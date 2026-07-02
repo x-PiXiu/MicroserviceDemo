@@ -1,0 +1,432 @@
+# =============================================================================
+# 认证服务配置文件 - Docker 容器版本
+# 版本: 2.0.0
+# 说明: 使用环境变量配置，适配 Docker 容器环境
+# =============================================================================
+
+# ==================== 服务基础配置 ====================
+service:
+  name: "auth_service"
+  version: "2.0.0"
+  description: "认证核心服务 - 管理用户登录认证"
+  environment: "${ENVIRONMENT}"
+
+# ==================== 服务器配置 ====================
+server_host: "0.0.0.0"
+server_port: ${AUTH_SERVICE_INTERNAL_PORT}
+
+# ==================== 网络配置 ====================
+network:
+  host: "0.0.0.0"
+  port: ${AUTH_SERVICE_INTERNAL_PORT}
+  worker_threads: ${WORKER_THREADS}
+  io_threads: ${IO_THREADS}
+  max_connections: 1000
+  connection_timeout: 30
+  keep_alive_timeout: 30
+  send_buffer_size: 1024
+  recv_buffer_size: 1024
+  read_timeout: 60
+  write_timeout: 60
+  backlog: 1024
+  reuse_address: true
+  reuse_port: true
+  tcp_no_delay: true
+  keep_alive: true
+  enable_epoll: true
+
+# ==================== 数据库配置 ====================
+mysql:
+  host: "${MYSQL_HOST}"
+  port: ${MYSQL_EXTERNAL_PORT}
+  username: "${MYSQL_USER}"
+  password: "${MYSQL_ROOT_PASSWORD}"
+  database: "auth_sessions_db"
+  charset: "utf8mb4"
+  collation: "utf8mb4_general_ci"
+
+  pool:
+    initial_size: 5
+    max_size: ${MYSQL_POOL_SIZE}
+    min_size: 2
+    max_idle: 10
+    max_wait_time: 5000
+    max_idle_time_ms: 600000
+    validation_query: "SELECT 1"
+    validation_interval_ms: 30000
+    test_on_borrow: true
+    test_on_return: false
+    test_while_idle: true
+
+  mysql_connect_timeout_ms: 5000
+  mysql_read_timeout_ms: 5000
+  mysql_write_timeout_ms: 5000
+  mysql_auto_reconnect: true
+  mysql_max_reconnect_attempts: 3
+  mysql_reconnect_interval_ms: 1000
+
+  mysql_use_ssl: false
+  mysql_ssl_ca: ""
+  mysql_ssl_cert: ""
+  mysql_ssl_key: ""
+  mysql_ssl_cipher: ""
+  mysql_ssl_verify_server_cert: false
+
+  mysql_max_allowed_packet: 67108864
+  mysql_net_buffer_length: 16384
+  mysql_compress: false
+  mysql_init_command: ""
+
+  mysql_isolation_level: "REPEATABLE-READ"
+  mysql_autocommit: true
+  mysql_lock_wait_timeout: 50000
+
+# ==================== Redis 配置 ====================
+redis:
+  host: "${REDIS_HOST}"
+  port: ${REDIS_EXTERNAL_PORT}
+  password: "${REDIS_PASSWORD}"
+  database: 0
+
+  pool_size: 5
+  max_pool_size: ${REDIS_POOL_SIZE}
+  min_pool_size: 2
+  pool_timeout_ms: 5000
+  pool_max_idle_time_ms: 600000
+  pool_test_on_borrow: true
+  pool_test_on_return: false
+
+  connect_timeout_ms: 2000
+  socket_timeout_ms: 3000
+  command_timeout_ms: 3000
+  tcp_keepalive: false
+  tcp_keepalive_idle: 60
+  tcp_keepalive_interval: 30
+  tcp_keepalive_count: 3
+
+  auto_reconnect: true
+  max_reconnect_attempts: 3
+  reconnect_interval_ms: 1000
+  retry_attempts: 2
+  retry_delay_ms: 500
+
+  cluster_enabled: false
+  cluster_max_redirections: 5
+  cluster_require_full_coverage: true
+
+  sentinel_enabled: false
+  sentinel_master_name: "mymaster"
+  sentinel_password: ""
+  sentinel_timeout_ms: 5000
+
+  use_ssl: false
+  ssl_cert_file: ""
+  ssl_key_file: ""
+  ssl_ca_file: ""
+  ssl_verify_peer: false
+  ssl_ciphers: ""
+
+  pipeline_size: 10
+  enable_pipeline: false
+  max_memory_policy: 0
+  compress_data: false
+
+  cache:
+    default_ttl: 300
+    user_info_ttl: 300
+    user_profile_ttl: 600
+    user_preferences_ttl: 1800
+
+# ==================== 线程池配置 ====================
+thread_pool:
+  core_size: 4
+  max_size: 16
+  keep_alive_ms: 60000
+  queue_capacity: 1024
+  allow_core_timeout: false
+  rejection_policy: "caller_runs"
+  prestart_core_threads: false
+  thread_priority: 5
+  name_prefix: "auth-service-"
+  enable_monitoring: false
+  monitoring_interval_ms: 5000
+
+# ==================== 外部服务配置 ====================
+external_services:
+  user_service:
+    base_url: "http://${USER_SERVICE_HOST}:${USER_SERVICE_INTERNAL_PORT}"
+    timeout_seconds: 5
+    retry_count: 3
+    cache_ttl_seconds: 300
+    cache:
+      enable: true
+
+# ==================== Kafka配置 ====================
+kafka:
+  enable: ${USE_KAFKA}
+  topic_prefix: "game_microservices"
+
+  producer:
+    brokers: "${KAFKA_HOST}:${KAFKA_PORT}"
+    client_id: ""
+    acks: -1
+    retries: 3
+    batch_size: 16384
+    linger_ms: 1
+    buffer_memory: 33554432
+    compression_type: "snappy"
+    max_request_size: 1048576
+    request_timeout_ms: 30000
+    delivery_timeout_ms: 120000
+    enable_idempotence: true
+    max_in_flight_requests: 5
+    security_protocol: "PLAINTEXT"
+    sasl:
+      mechanism: "PLAIN"
+      username: ""
+      password: ""
+    ssl:
+      ca_location: ""
+      certificate_location: ""
+      key_location: ""
+      key_password: ""
+
+  consumer:
+    brokers: "${KAFKA_HOST}:${KAFKA_PORT}"
+    group_id: "auth_service_cluster"
+    client_id: ""
+    auto_offset_reset: "latest"
+    enable_auto_commit: true
+    auto_commit_interval_ms: 1000
+    session_timeout_ms: 30000
+    heartbeat_interval_ms: 10000
+    max_poll_interval_ms: 300000
+    max_poll_records: 500
+    fetch_min_bytes: 1
+    fetch_max_wait_ms: 500
+    max_partition_fetch_bytes: 1048576
+    check_crcs: true
+    isolation_level: "read_uncommitted"
+    security_protocol: "PLAINTEXT"
+    sasl:
+      mechanism: "PLAIN"
+      username: ""
+      password: ""
+    ssl:
+      ca_location: ""
+      certificate_location: ""
+      key_location: ""
+      key_password: ""
+
+# ==================== JWT配置 ====================
+jwt:
+  secret_key: "${JWT_SECRET_KEY}"
+  issuer: "game-microservices-auth"
+  audience: "game-microservices-clients"
+  access_token_expire_seconds: ${JWT_ACCESS_TOKEN_EXPIRE}
+  refresh_token_expire_seconds: ${JWT_REFRESH_TOKEN_EXPIRE}
+  blacklist:
+    enable: true
+    cleanup_interval_hours: 1
+  algorithm: "HS256"
+  enable_jti: true
+  strict_audience_check: true
+  strict_issuer_check: true
+
+# ==================== 密码策略配置 ====================
+password:
+  min_length: 8
+  max_length: 128
+  require_uppercase: true
+  require_lowercase: true
+  require_digits: true
+  require_special_chars: true
+  min_special_chars: 1
+  min_digits: 1
+  min_uppercase: 1
+  min_lowercase: 1
+  forbid_common_passwords: true
+  forbid_personal_info: true
+  bcrypt_cost: 12
+  special_chars: "!@#$%^&*()_+-=[]{}|;:,.<>?"
+
+# ==================== 会话管理配置 ====================
+session:
+  session_timeout: 3600
+  max_idle_time: 1800
+  max_concurrent_sessions: 10
+  enable_multi_device: true
+  enable_ip_validation: true
+  enable_device_validation: false
+  enable_session_migration: true
+  cleanup_interval: 60
+  enable_session_encryption: true
+  encryption_key: "${SESSION_ENCRYPTION_KEY}"
+  enable_anomaly_detection: true
+  max_ip_change_frequency: 0.1
+
+# ==================== 用户仓库配置 ====================
+user_repository:
+  enable_cache: true
+  default_cache_ttl: 3600
+  user_cache_ttl: 1800
+  game_data_cache_ttl: 600
+  enable_read_write_split: false
+  max_batch_size: 1000
+  enable_async_operations: true
+  connection_timeout_seconds: 30
+  query_timeout_seconds: 60
+
+# ==================== 性能配置 ====================
+performance:
+  max_concurrent_requests: 1000
+  request_timeout: 30
+  enable_request_logging: true
+  enable_metrics: true
+  thread_pool_size: 16
+  scheduler_thread_pool_size: 4
+
+# ==================== 日志配置 ====================
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: true
+    path: "/app/logs/auth_service.log"
+    max_size: 536870912
+    max_files: 5
+  async:
+    enabled: false
+  level: "${LOG_LEVEL}"
+
+# ==================== 安全配置 ====================
+security:
+  account_lockout:
+    max_failed_attempts: 5
+    lockout_duration_minutes: 15
+  session:
+    session_timeout_hours: 24
+  enable_rate_limiting: true
+  rate_limit_requests_per_minute: ${RATE_LIMIT_REQUESTS_PER_MINUTE}
+  enable_cors: ${ENABLE_CORS}
+  cors_allowed_origins: [ "${CORS_ALLOWED_ORIGINS}" ]
+  cors_allowed_methods: [ "GET", "POST", "PUT", "DELETE", "OPTIONS" ]
+  cors_allowed_headers: [ "Content-Type", "Authorization" ]
+  enable_request_validation: true
+  max_request_size: "10MB"
+
+# ==================== 监控配置 ====================
+monitoring:
+  enable_health_check: true
+  health_check_interval: 30
+  enable_metrics_collection: true
+  metrics_endpoint: "/metrics"
+  enable_prometheus: false
+  prometheus_port: 9090
+  audit_logging:
+    enable: true
+
+# ==================== 游戏配置 ====================
+game:
+  supported_types:
+    - "snake"
+    - "tetris"
+    - "chess"
+    - "poker"
+    - "gomoku"
+    - "rpg"
+    - "moba"
+    - "fps"
+    - "strategy"
+  server_selection:
+    algorithm: "least_connections"
+    health_check_interval: 60
+    max_players_per_server: 100
+    enable_region_preference: true
+  session:
+    game_session_timeout: 7200
+    enable_game_session_migration: true
+    max_game_sessions_per_user: 3
+
+# ==================== 邮件配置 ====================
+email:
+  enable: false
+  smtp_host: "${SMTP_HOST}"
+  smtp_port: ${SMTP_PORT}
+  smtp_user: "${SMTP_USER}"
+  smtp_password: "${SMTP_PASSWORD}"
+  from_address: "noreply@game-microservices.com"
+  from_name: "Game Microservices"
+
+# ==================== 第三方登录配置 ====================
+oauth:
+  enable_google: false
+  google_client_id: "${GOOGLE_CLIENT_ID}"
+  google_client_secret: "${GOOGLE_CLIENT_SECRET}"
+
+  enable_github: false
+  github_client_id: "${GITHUB_CLIENT_ID}"
+  github_client_secret: "${GITHUB_CLIENT_SECRET}"
+
+  enable_wechat: false
+  wechat_app_id: "${WECHAT_APP_ID}"
+  wechat_app_secret: "${WECHAT_APP_SECRET}"
+
+  enable_steam: false
+  steam_app_id: "${STEAM_APP_ID}"
+  steam_api_key: "${STEAM_API_KEY}"
+
+  enable_qq: false
+  qq_app_id: "${QQ_APP_ID}"
+  qq_app_key: "${QQ_APP_KEY}"
+
+# ==================== 开发配置 ====================
+development:
+  enable_debug_mode: false
+  enable_test_endpoints: false
+  mock_external_services: false
+  enable_detailed_error_messages: false
+  enable_request_tracing: false
+
+# ==================== 服务注册中心配置 ====================
+service_registry:
+  enabled: true
+  host: "${SERVICE_REGISTRY_HOST}"
+  port: ${SERVICE_REGISTRY_INTERNAL_PORT}
+  heartbeat_interval_s: 30
+  register_timeout_s: 10
+  request_timeout_ms: 5000
+  auto_heartbeat: true
+  auto_reconnect: true
+  reconnect_delay_s: 5
+  metadata:
+    service_type: "core"
+    region: "cn-east"
+
+# ==================== 环境特定配置 ====================
+environment: "${ENVIRONMENT}"
+
+production:
+  logging:
+    level: "WARNING"
+    console: false
+  security:
+    enable_cors: false
+    cors_allowed_origins: ["https://yourgame.com"]
+  development:
+    enable_debug_mode: false
+    enable_test_endpoints: false
+    enable_detailed_error_messages: false
+
+testing:
+  database:
+    mysql:
+      database: "game_microservices_test"
+    redis:
+      database: 1
+  jwt:
+    access_token_expire_seconds: 300
+  development:
+    enable_debug_mode: true
+    enable_test_endpoints: true
+    mock_external_services: true

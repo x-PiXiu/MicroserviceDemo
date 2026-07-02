@@ -1,0 +1,163 @@
+```mermaid
+---
+title: 五子棋游戏服务间数据流图 (详细版)
+
+---
+
+%% =============================================================================
+%% 五子棋游戏服务与其他微服务的完整数据流交互图
+%% 创建日期: 2025-09-27
+%% 版本: v2.1.0
+%% 描述: 展示五子棋服务如何与用户服务、游戏数据服务、认证服务等交互
+%% =============================================================================
+
+sequenceDiagram
+    participant WC as Web客户端
+    participant MC as 移动客户端
+    participant GW as API网关
+    participant AS as 认证服务<br/>:8081
+    participant US as 用户服务<br/>:8082
+    participant GDS as 游戏数据服务<br/>:8083
+    participant GS as 五子棋服务<br/>:8084
+    participant GDB as 五子棋数据库<br/>gomoku_game_db
+    participant RC as Redis缓存
+    participant MQ as 消息队列<br/>RabbitMQ
+
+%% =======================================================================
+%% 阶段1: 用户认证和入场
+%% =======================================================================
+Note over WC,MQ: 🔐 阶段1: 用户认证和游戏入场
+
+WC->>GW: 1.1 POST /api/auth/login<br/>{username, password}
+GW->>AS: 1.2 转发登录请求
+AS->>AS: 1.3 验证用户凭据
+AS-->>GW: 1.4 返回JWT Token + 用户信息
+GW-->>WC: 1.5 登录成功响应<br/>{token, user_info}
+
+WC->>GW: 1.6 WebSocket连接请求<br/>ws://api/gomoku + Authorization Header
+GW->>GW: 1.7 验证JWT Token有效性
+GW->>GS: 1.8 建立WebSocket连接<br/>携带用户ID
+
+%% 五子棋服务获取用户信息
+GS->>US: 1.9 HTTP GET /api/users/{user_id}<br/>获取用户基础信息
+US->>US: 1.10 查询用户数据库
+US-->>GS: 1.11 返回用户信息<br/>{user_id, username, nickname, status}
+
+GS->>GDS: 1.12 HTTP GET /api/game-profiles/{user_id}?game_type=1<br/>获取五子棋游戏档案
+GDS->>GDS: 1.13 查询游戏数据库
+GDS-->>GS: 1.14 返回游戏档案<br/>{rating, level, games_played, win_rate}
+
+%% 本地缓存更新
+GS->>GDB: 1.15 UPSERT INTO gomoku_users<br/>同步用户信息到本地缓存
+GS->>RC: 1.16 SET user_session:{user_id}<br/>缓存用户会话信息
+
+GS-->>WC: 1.17 WebSocket认证成功<br/>{status: "authenticated", user_profile}
+
+%% =======================================================================
+%% 阶段2: 房间管理和游戏创建
+%% =======================================================================
+Note over WC,MQ: 🏠 阶段2: 房间管理和游戏创建
+
+WC->>GS: 2.1 WebSocket创建房间<br/>{action: "create_room", config: {...}}
+GS->>GDB: 2.2 INSERT INTO gomoku_rooms<br/>创建新房间记录
+GS->>RC: 2.3 SET room:{room_id}<br/>缓存房间状态
+GS-->>WC: 2.4 房间创建成功<br/>{room_id, room_info}
+
+MC->>GW: 2.5 WebSocket加入房间<br/>{action: "join_room", room_id}
+GW->>GS: 2.6 转发加入房间请求
+GS->>GDB: 2.7 SELECT FROM gomoku_rooms WHERE room_id=?<br/>验证房间存在
+GS->>GDB: 2.8 UPDATE gomoku_rooms SET player_count=2<br/>更新房间玩家数
+GS->>RC: 2.9 UPDATE room:{room_id}<br/>更新缓存中的房间状态
+
+%% 游戏开始
+GS->>GDB: 2.10 INSERT INTO gomoku_games<br/>创建新游戏记录
+GS->>RC: 2.11 SET game:{game_id}<br/>缓存游戏状态
+GS-->>WC: 2.12 广播游戏开始<br/>{action: "game_started", game_info}
+GS-->>MC: 2.13 广播游戏开始<br/>{action: "game_started", game_info}
+
+%% =======================================================================
+%% 阶段3: 游戏进行中的实时交互
+%% =======================================================================
+Note over WC,MQ: 🎮 阶段3: 游戏进行中的实时交互
+
+loop 游戏进行中
+    WC->>GS: 3.1 WebSocket落子<br/>{action: "make_move", position: {x,y}}
+    GS->>GS: 3.2 验证落子合法性<br/>检查位置、轮次、禁手等
+    GS->>GDB: 3.3 INSERT INTO gomoku_moves<br/>记录移动详情
+    GS->>RC: 3.4 UPDATE game:{game_id}<br/>更新游戏状态缓存
+    GS->>GS: 3.5 检查游戏结束条件<br/>五连线、禁手等
+    GS-->>WC: 3.6 广播落子结果<br/>{action: "move_result", board_state}
+    GS-->>MC: 3.7 广播落子结果<br/>{action: "move_result", board_state}
+    
+    alt 游戏继续
+        Note over GS: 等待下一步
+    else 游戏结束
+        GS->>GDB: 3.8 UPDATE gomoku_games<br/>SET game_result, winner_id, finished_at
+        GS-->>WC: 3.9 广播游戏结束<br/>{action: "game_ended", result}
+        GS-->>MC: 3.10 广播游戏结束<br/>{action: "game_ended", result}
+    end
+end
+
+%% =======================================================================
+%% 阶段4: 游戏结束后的数据同步
+%% =======================================================================
+Note over WC,MQ: 📊 阶段4: 游戏结束后的数据同步
+
+%% 向游戏数据服务提交结果
+GS->>GDS: 4.1 HTTP POST /api/game-results<br/>{game_data, players, result}
+GDS->>GDS: 4.2 计算积分变化<br/>ELO算法计算
+GDS->>GDS: 4.3 更新成就进度<br/>检查达成条件
+GDS->>GDS: 4.4 更新排行榜<br/>刷新用户排名
+GDS-->>GS: 4.5 返回积分变化<br/>{rating_changes, achievements}
+
+%% 更新本地用户统计
+GS->>GDB: 4.6 UPDATE gomoku_users<br/>SET wins+1, current_rating, total_games+1
+GS->>RC: 4.7 DEL user_session:{user_id}<br/>清理会话缓存
+GS->>RC: 4.8 DEL game:{game_id}<br/>清理游戏状态缓存
+
+%% 向用户服务更新在线状态
+GS->>US: 4.9 HTTP PUT /api/users/{user_id}/status<br/>{online_status: "lobby"}
+US-->>GS: 4.10 状态更新确认
+
+%% =======================================================================
+%% 阶段5: 异步事件发布和消费
+%% =======================================================================
+Note over WC,MQ: 📨 阶段5: 异步事件发布和消费
+
+%% 发布游戏结束事件
+GS->>MQ: 5.1 发布事件<br/>topic: game.finished<br/>{game_id, players, result}
+
+%% 游戏数据服务发布积分事件
+GDS->>MQ: 5.2 发布事件<br/>topic: rating.updated<br/>{user_id, old_rating, new_rating}
+
+%% 用户服务发布状态事件
+US->>MQ: 5.3 发布事件<br/>topic: user.status.changed<br/>{user_id, status, timestamp}
+
+%% 五子棋服务消费相关事件
+MQ-->>GS: 5.4 消费积分更新事件<br/>同步最新积分到本地
+GS->>GDB: 5.5 UPDATE gomoku_users<br/>SET current_rating = new_rating
+
+MQ-->>GS: 5.6 消费用户状态事件<br/>更新用户活跃状态
+GS->>GDB: 5.7 UPDATE gomoku_users<br/>SET last_game_at, is_active
+
+%% =======================================================================
+%% 阶段6: 监控和运维数据
+%% =======================================================================
+Note over WC,MQ: 📈 阶段6: 监控和运维数据
+
+loop 每30秒
+    GS->>GDB: 6.1 INSERT INTO gomoku_server_status<br/>记录服务器状态
+    GS->>RC: 6.2 SET server_metrics<br/>缓存性能指标
+end
+
+%% 定期数据清理
+loop 每天凌晨3点
+    GS->>GDB: 6.3 CALL CleanupOldData()<br/>清理过期数据
+    GS->>RC: 6.4 清理过期缓存
+end
+
+%% =======================================================================
+%% 数据流总结说明
+%% =======================================================================
+Note over WC,MQ: 🎯 数据流特点总结:<br/>1. 用户信息跨服务同步，本地缓存优化性能<br/>2. 游戏状态通过WebSocket实时广播<br/>3. 游戏结果通过HTTP API同步到游戏数据服务<br/>4. 积分和成就数据通过消息队列异步同步<br/>5. Redis缓存减少数据库压力<br/>6. 定期清理保持数据库轻量化
+```

@@ -1,0 +1,914 @@
+# 游戏数据核心服务业务流程图
+
+## 1. 游戏数据服务整体架构图
+
+```mermaid
+graph TB
+    %% 外部系统
+    Client[客户端应用]
+    Gateway[API网关<br/>8080]
+    
+    %% 游戏数据服务核心
+    subgraph GameDataService["游戏数据核心服务 (8083)"]
+        direction TB
+        HTTP[HTTP服务器]
+        Controller[控制器层]
+        Service[业务逻辑层]
+        Repository[数据访问层]
+        TimerMgr[定时器管理器]
+        ThreadPool[线程池]
+        CacheLayer[缓存层]
+    end
+    
+    %% 数据存储
+    MySQL[(MySQL数据库<br/>game_service_db)]
+    Redis[(Redis缓存<br/>游戏数据缓存)]
+    
+    %% 其他服务
+    AuthSvc[认证服务<br/>8008]
+    UserSvc[用户服务<br/>8082]
+    GameSvc[游戏服务<br/>8084-8085]
+    
+    %% 连接关系
+    Client -->|HTTP请求| Gateway
+    Gateway -->|路由转发| HTTP
+    HTTP --> Controller
+    Controller --> Service
+    Service --> Repository
+    Repository --> MySQL
+    Repository --> CacheLayer
+    CacheLayer --> Redis
+    
+    %% 服务间通信
+    Gateway <-.->|服务注册/心跳| TimerMgr
+    AuthSvc -.->|令牌验证| HTTP
+    UserSvc -.->|用户信息查询| HTTP
+    GameSvc -.->|游戏数据更新| HTTP
+    
+    %% 定时任务
+    TimerMgr -.->|缓存清理| CacheLayer
+    TimerMgr -.->|数据归档| Repository
+    TimerMgr -.->|成就检查| Service
+    TimerMgr -.->|排行榜更新| Service
+    TimerMgr -.->|心跳发送| Gateway
+    
+    %% 线程池支持
+    ThreadPool -.-> HTTP
+    ThreadPool -.-> TimerMgr
+    ThreadPool -.-> Service
+    
+    %% 样式
+    classDef serviceClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef dbClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef externalClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef coreClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    
+    class GameDataService serviceClass
+    class MySQL,Redis dbClass
+    class Client,Gateway,AuthSvc,UserSvc,GameSvc externalClass
+    class Service,Repository,CacheLayer coreClass
+```
+
+## 2. 游戏数据服务启动流程图
+
+```mermaid
+flowchart TD
+    Start([服务启动]) --> LoadConfig[加载配置文件]
+    LoadConfig --> ValidateConfig{配置验证}
+    ValidateConfig -->|失败| Error[启动失败]
+    ValidateConfig -->|成功| InitDB[初始化数据库连接池]
+    
+    InitDB --> TestMySQL{测试MySQL连接}
+    TestMySQL -->|失败| Error
+    TestMySQL -->|成功| TestRedis{测试Redis连接}
+    TestRedis -->|失败| Error
+    TestRedis -->|成功| CreateTables[创建/验证数据库表结构]
+    
+    CreateTables --> InitRepo[初始化数据访问层]
+    InitRepo --> InitService[初始化业务服务层]
+    InitService --> InitThreadPool[初始化线程池]
+    InitThreadPool --> InitTimer[初始化定时器管理器]
+    
+    InitTimer --> StartTimer{启动定时器}
+    StartTimer -->|失败| Error
+    StartTimer -->|成功| InitHTTP[初始化HTTP服务器]
+    
+    InitHTTP --> SetupRoutes[设置API路由]
+    SetupRoutes --> Route1[用户档案路由]
+    SetupRoutes --> Route2[成就系统路由]
+    SetupRoutes --> Route3[库存管理路由]
+    SetupRoutes --> Route4[货币系统路由]
+    SetupRoutes --> Route5[排行榜路由]
+    SetupRoutes --> Route6[系统管理路由]
+    
+    Route1 --> StartHTTP{启动HTTP服务器}
+    Route2 --> StartHTTP
+    Route3 --> StartHTTP
+    Route4 --> StartHTTP
+    Route5 --> StartHTTP
+    Route6 --> StartHTTP
+    
+    StartHTTP -->|失败| Error
+    StartHTTP -->|成功| SetupTasks[设置定时任务]
+    
+    SetupTasks --> Task1[缓存清理任务<br/>每30分钟]
+    SetupTasks --> Task2[数据归档任务<br/>每24小时]
+    SetupTasks --> Task3[成就检查任务<br/>每1小时]
+    SetupTasks --> Task4[排行榜更新任务<br/>每10分钟]
+    SetupTasks --> Task5[库存清理任务<br/>每6小时]
+    SetupTasks --> Task6[货币审计任务<br/>每1小时]
+    SetupTasks --> Task7[心跳任务<br/>每30秒]
+    SetupTasks --> Task8[统计收集任务<br/>每15分钟]
+    
+    Task1 --> RegisterGateway[注册到API网关]
+    Task2 --> RegisterGateway
+    Task3 --> RegisterGateway
+    Task4 --> RegisterGateway
+    Task5 --> RegisterGateway
+    Task6 --> RegisterGateway
+    Task7 --> RegisterGateway
+    Task8 --> RegisterGateway
+    
+    RegisterGateway --> GatewayReg{网关注册}
+    GatewayReg -->|失败| Warning[记录警告,继续启动]
+    GatewayReg -->|成功| Success[服务启动成功]
+    Warning --> Success
+    
+    Success --> Running[服务运行中<br/>等待游戏数据请求]
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef taskClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    
+    class LoadConfig,InitDB,CreateTables,InitRepo,InitService,InitThreadPool,InitTimer,InitHTTP,SetupRoutes,SetupTasks,RegisterGateway processClass
+    class ValidateConfig,TestMySQL,TestRedis,StartTimer,StartHTTP,GatewayReg decisionClass
+    class Error errorClass
+    class Success,Running successClass
+    class Task1,Task2,Task3,Task4,Task5,Task6,Task7,Task8 taskClass
+```
+
+## 3. 用户档案管理业务流程图
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant Gateway as API网关
+    participant GameData as 游戏数据服务
+    participant Cache as Redis缓存
+    participant Database as MySQL数据库
+    participant UserSvc as 用户服务
+    
+    Note over Client, UserSvc: 用户档案创建流程
+    Client->>Gateway: POST /api/v1/profiles
+    Gateway->>GameData: 转发档案创建请求
+    GameData->>GameData: 验证必需字段
+    GameData->>Cache: 检查用户档案缓存
+    Cache-->>GameData: 缓存未命中或已存在
+    GameData->>Database: 检查档案是否已存在
+    Database-->>GameData: 档案检查结果
+    alt 档案不存在
+        GameData->>Database: 插入新档案记录
+        Database-->>GameData: 创建成功
+        GameData->>Cache: 缓存新档案数据
+        GameData-->>Gateway: 201 Created + 档案数据
+    else 档案已存在
+        GameData-->>Gateway: 409 Conflict
+    end
+    Gateway-->>Client: 档案创建响应
+    
+    Note over Client, UserSvc: 用户档案查询流程(带缓存)
+    Client->>Gateway: GET /api/v1/profiles/user_12345
+    Gateway->>GameData: 转发档案查询请求
+    GameData->>Cache: 查询档案缓存
+    alt 缓存命中
+        Cache-->>GameData: 返回缓存档案数据
+        GameData-->>Gateway: 200 OK + 档案数据
+    else 缓存未命中
+        Cache-->>GameData: 缓存未命中
+        GameData->>Database: 查询档案数据
+        Database-->>GameData: 档案数据
+        GameData->>Cache: 缓存档案数据(TTL=5分钟)
+        GameData-->>Gateway: 200 OK + 档案数据
+    end
+    Gateway-->>Client: 档案查询响应
+    
+    Note over Client, UserSvc: 用户档案更新流程
+    Client->>Gateway: PUT /api/v1/profiles/user_12345
+    Gateway->>GameData: 转发档案更新请求
+    GameData->>Database: 查询现有档案
+    Database-->>GameData: 现有档案数据
+    GameData->>GameData: 验证更新数据
+    GameData->>Database: 更新档案记录
+    Database-->>GameData: 更新结果
+    GameData->>Cache: 清除相关缓存
+    GameData->>Cache: 缓存更新后的档案
+    GameData-->>Gateway: 200 OK + 更新后档案
+    Gateway-->>Client: 档案更新响应
+    
+    Note over Client, UserSvc: 档案与用户服务联动
+    GameData->>UserSvc: 验证用户存在性
+    UserSvc-->>GameData: 用户验证结果
+    GameData->>GameData: 同步用户基础信息
+```
+
+## 4. 成就系统业务流程图
+
+```mermaid
+flowchart TD
+    GameAction[游戏行为触发] --> TriggerCheck{成就触发检查}
+    TriggerCheck -->|条件满足| ValidateAchievement[验证成就合法性]
+    TriggerCheck -->|条件不满足| NoAction[无操作]
+    
+    ValidateAchievement --> CheckDuplicate{检查是否已解锁}
+    CheckDuplicate -->|已解锁| AlreadyUnlocked[返回已解锁状态]
+    CheckDuplicate -->|未解锁| CreateAchievement[创建成就记录]
+    
+    CreateAchievement --> SaveToDB[保存到数据库]
+    SaveToDB --> UpdateCache[更新缓存]
+    UpdateCache --> AwardRewards[发放奖励]
+    
+    AwardRewards --> UpdateCurrency[更新货币]
+    UpdateCurrency --> AddInventory[添加物品奖励]
+    AddInventory --> UpdateExp[更新经验值]
+    UpdateExp --> NotifyUser[通知用户]
+    
+    NotifyUser --> LogAchievement[记录成就日志]
+    LogAchievement --> CheckChain{检查连锁成就}
+    CheckChain -->|有连锁| TriggerCheck
+    CheckChain -->|无连锁| AchievementComplete[成就解锁完成]
+    
+    subgraph PeriodicCheck[定时成就检查]
+        direction TB
+        Timer[定时器触发] --> ScanUsers[扫描用户]
+        ScanUsers --> CheckProgress[检查成就进度]
+        CheckProgress --> AutoUnlock[自动解锁满足条件的成就]
+        AutoUnlock --> BatchNotify[批量通知]
+    end
+    
+    Timer -.-> TriggerCheck
+    
+    %% 样式
+    classDef actionClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef checkClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef processClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef rewardClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    
+    class GameAction,CreateAchievement,SaveToDB,UpdateCache actionClass
+    class TriggerCheck,CheckDuplicate,CheckChain checkClass
+    class ValidateAchievement,NotifyUser,LogAchievement processClass
+    class AwardRewards,UpdateCurrency,AddInventory,UpdateExp rewardClass
+```
+
+## 5. 库存和货币管理流程图
+
+```mermaid
+flowchart TD
+    subgraph InventoryFlow[库存管理流程]
+        direction TB
+        AddItem[添加物品请求] --> ValidateItem{验证物品数据}
+        ValidateItem -->|有效| CheckExisting{检查已有物品}
+        ValidateItem -->|无效| ItemError[返回错误]
+        
+        CheckExisting -->|存在| UpdateQuantity[更新数量]
+        CheckExisting -->|不存在| CreateNewItem[创建新物品]
+        
+        UpdateQuantity --> SaveInventory[保存库存变更]
+        CreateNewItem --> SaveInventory
+        SaveInventory --> ClearInvCache[清除库存缓存]
+        ClearInvCache --> ItemSuccess[返回成功]
+        
+        UseItem[使用物品请求] --> CheckItemExists{检查物品存在}
+        CheckItemExists -->|不存在| ItemNotFound[物品不存在]
+        CheckItemExists -->|存在| CheckQuantity{检查数量}
+        CheckQuantity -->|不足| InsufficientQty[数量不足]
+        CheckQuantity -->|充足| ConsumeItem[消耗物品]
+        ConsumeItem --> ApplyEffect[应用物品效果]
+        ApplyEffect --> SaveInventory
+    end
+    
+    subgraph CurrencyFlow[货币管理流程]
+        direction TB
+        CurrencyOp[货币操作请求] --> ValidateCurrency{验证货币数据}
+        ValidateCurrency -->|有效| DetermineOp{确定操作类型}
+        ValidateCurrency -->|无效| CurrencyError[返回错误]
+        
+        DetermineOp -->|设置| SetAmount[设置货币数量]
+        DetermineOp -->|增加| AddAmount[增加货币数量]
+        DetermineOp -->|减少| SubtractAmount[减少货币数量]
+        
+        SetAmount --> CheckNegative{检查负值}
+        AddAmount --> CheckOverflow{检查溢出}
+        SubtractAmount --> CheckSufficient{检查余额充足}
+        
+        CheckNegative -->|有负值| NegativeError[负值错误]
+        CheckNegative -->|无负值| UpdateCurrencyDB[更新货币数据库]
+        CheckOverflow -->|溢出| OverflowError[溢出错误]
+        CheckOverflow -->|正常| UpdateCurrencyDB
+        CheckSufficient -->|不足| InsufficientFunds[余额不足]
+        CheckSufficient -->|充足| UpdateCurrencyDB
+        
+        UpdateCurrencyDB --> ClearCurrencyCache[清除货币缓存]
+        ClearCurrencyCache --> LogTransaction[记录交易日志]
+        LogTransaction --> CurrencySuccess[返回成功]
+    end
+    
+    subgraph AuditFlow[审计流程]
+        direction TB
+        AuditTimer[审计定时器] --> ScanTransactions[扫描交易记录]
+        ScanTransactions --> DetectAnomalies[检测异常]
+        DetectAnomalies --> FlagSuspicious[标记可疑交易]
+        FlagSuspicious --> NotifyAdmin[通知管理员]
+    end
+    
+    %% 流程连接
+    SaveInventory -.-> AuditTimer
+    LogTransaction -.-> AuditTimer
+    
+    %% 样式
+    classDef inventoryClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef currencyClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef auditClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    
+    class InventoryFlow inventoryClass
+    class CurrencyFlow currencyClass
+    class AuditFlow auditClass
+    class ItemError,CurrencyError,NegativeError,OverflowError,InsufficientFunds,ItemNotFound,InsufficientQty errorClass
+```
+
+## 6. 排行榜管理流程图
+
+```mermaid
+flowchart TD
+    subgraph LeaderboardUpdate[排行榜更新流程]
+        direction TB
+        ScoreUpdate[分数更新请求] --> ValidateScore{验证分数数据}
+        ValidateScore -->|有效| CheckExistingEntry{检查现有条目}
+        ValidateScore -->|无效| ScoreError[返回错误]
+        
+        CheckExistingEntry -->|存在且更高| UpdateEntry[更新条目]
+        CheckExistingEntry -->|存在且更低| IgnoreUpdate[忽略更新]
+        CheckExistingEntry -->|不存在| CreateEntry[创建新条目]
+        
+        UpdateEntry --> RecalculateRanks[重新计算排名]
+        CreateEntry --> RecalculateRanks
+        RecalculateRanks --> UpdateRankCache[更新排名缓存]
+        UpdateRankCache --> NotifyRankChange[通知排名变化]
+        NotifyRankChange --> LeaderboardSuccess[更新成功]
+    end
+    
+    subgraph LeaderboardQuery[排行榜查询流程]
+        direction TB
+        QueryRequest[查询请求] --> CheckCache{检查缓存}
+        CheckCache -->|命中| ReturnCached[返回缓存数据]
+        CheckCache -->|未命中| QueryDB[查询数据库]
+        QueryDB --> CalculateRanks[计算排名]
+        CalculateRanks --> CacheResults[缓存结果]
+        CacheResults --> ReturnResults[返回结果]
+        
+        ReturnCached --> ApplyFilters[应用过滤器]
+        ReturnResults --> ApplyFilters
+        ApplyFilters --> FormatResponse[格式化响应]
+        FormatResponse --> QuerySuccess[查询成功]
+    end
+    
+    subgraph PeriodicMaintenance[定期维护流程]
+        direction TB
+        MaintenanceTimer[维护定时器] --> ResetPeriodic[重置周期排行榜]
+        ResetPeriodic --> ArchiveOld[归档旧数据]
+        ArchiveOld --> CleanupCache[清理缓存]
+        CleanupCache --> RecalculateAll[重新计算所有排名]
+        RecalculateAll --> MaintenanceComplete[维护完成]
+    end
+    
+    subgraph RankingAlgorithm[排名算法]
+        direction TB
+        SortByScore[按分数排序] --> HandleTies[处理并列]
+        HandleTies --> AssignRanks[分配排名]
+        AssignRanks --> UpdatePositions[更新位置]
+    end
+    
+    %% 流程连接
+    RecalculateRanks --> SortByScore
+    CalculateRanks --> SortByScore
+    RecalculateAll --> SortByScore
+    
+    %% 样式
+    classDef updateClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef queryClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef maintenanceClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef algorithmClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    
+    class LeaderboardUpdate updateClass
+    class LeaderboardQuery queryClass
+    class PeriodicMaintenance maintenanceClass
+    class RankingAlgorithm algorithmClass
+    class ScoreError errorClass
+```
+
+## 7. 定时任务执行流程图
+
+```mermaid
+flowchart TD
+    subgraph TimingWheel[时间轮调度器]
+        direction TB
+        Scheduler[HierarchicalTimingWheel<br/>层次化时间轮]
+        TaskQueue[任务队列]
+        Executor[任务执行器]
+    end
+    
+    subgraph GameDataTasks[游戏数据服务定时任务]
+        direction TB
+        CacheCleanup[缓存清理任务<br/>每30分钟执行]
+        DataArchival[数据归档任务<br/>每24小时执行]
+        AchievementCheck[成就检查任务<br/>每1小时执行]
+        LeaderboardUpdate[排行榜更新任务<br/>每10分钟执行]
+        InventoryCleanup[库存清理任务<br/>每6小时执行]
+        CurrencyAudit[货币审计任务<br/>每1小时执行]
+        HeartbeatTask[心跳任务<br/>每30秒执行]
+        StatsCollection[统计收集任务<br/>每15分钟执行]
+    end
+    
+    Start([定时器启动]) --> Scheduler
+    Scheduler --> TaskQueue
+    TaskQueue --> Executor
+    
+    %% 任务注册
+    CacheCleanup --> Scheduler
+    DataArchival --> Scheduler
+    AchievementCheck --> Scheduler
+    LeaderboardUpdate --> Scheduler
+    InventoryCleanup --> Scheduler
+    CurrencyAudit --> Scheduler
+    HeartbeatTask --> Scheduler
+    StatsCollection --> Scheduler
+    
+    %% 缓存清理任务流程
+    Executor -->|执行| CacheExec[缓存清理执行]
+    CacheExec --> ScanExpiredCache[扫描过期缓存]
+    ScanExpiredCache --> RemoveExpired[删除过期项]
+    RemoveExpired --> CompactCache[压缩缓存空间]
+    CompactCache --> CacheComplete[缓存清理完成]
+    
+    %% 数据归档任务流程
+    Executor -->|执行| ArchiveExec[数据归档执行]
+    ArchiveExec --> IdentifyOldData[识别旧数据]
+    IdentifyOldData --> MoveToArchive[移动到归档表]
+    MoveToArchive --> CleanupOldTables[清理旧表数据]
+    CleanupOldTables --> ArchiveComplete[归档完成]
+    
+    %% 成就检查任务流程
+    Executor -->|执行| AchievementExec[成就检查执行]
+    AchievementExec --> ScanUserProgress[扫描用户进度]
+    ScanUserProgress --> EvaluateConditions[评估成就条件]
+    EvaluateConditions --> AutoUnlockAchievements[自动解锁成就]
+    AutoUnlockAchievements --> AchievementComplete[成就检查完成]
+    
+    %% 排行榜更新任务流程
+    Executor -->|执行| LeaderboardExec[排行榜更新执行]
+    LeaderboardExec --> RecalculateRankings[重新计算排名]
+    RecalculateRankings --> UpdateRankCache[更新排名缓存]
+    UpdateRankCache --> RefreshLeaderboards[刷新排行榜]
+    RefreshLeaderboards --> LeaderboardComplete[排行榜更新完成]
+    
+    %% 库存清理任务流程
+    Executor -->|执行| InventoryExec[库存清理执行]
+    InventoryExec --> ScanExpiredItems[扫描过期物品]
+    ScanExpiredItems --> RemoveExpiredItems[移除过期物品]
+    RemoveExpiredItems --> ConsolidateStacks[合并相同物品]
+    ConsolidateStacks --> InventoryComplete[库存清理完成]
+    
+    %% 货币审计任务流程
+    Executor -->|执行| AuditExec[货币审计执行]
+    AuditExec --> ScanTransactions[扫描货币交易]
+    ScanTransactions --> DetectAnomalies[检测异常交易]
+    DetectAnomalies --> FlagSuspicious[标记可疑交易]
+    FlagSuspicious --> GenerateReport[生成审计报告]
+    GenerateReport --> AuditComplete[审计完成]
+    
+    %% 心跳任务流程
+    Executor -->|执行| HeartbeatExec[心跳任务执行]
+    HeartbeatExec --> BuildMetadata[构建服务元数据]
+    BuildMetadata --> SendToGateway[发送到API网关]
+    SendToGateway --> HeartbeatResp{心跳响应}
+    HeartbeatResp -->|成功| LogHeartbeatSuccess[记录心跳成功]
+    HeartbeatResp -->|失败| LogHeartbeatFailure[记录心跳失败]
+    LogHeartbeatSuccess --> HeartbeatComplete[心跳完成]
+    LogHeartbeatFailure --> HeartbeatComplete
+    
+    %% 统计收集任务流程
+    Executor -->|执行| StatsExec[统计收集执行]
+    StatsExec --> CollectSystemStats[收集系统统计]
+    CollectSystemStats --> CollectBusinessStats[收集业务统计]
+    CollectBusinessStats --> CollectPerformanceStats[收集性能统计]
+    CollectPerformanceStats --> UpdateMetrics[更新性能指标]
+    UpdateMetrics --> StatsComplete[统计收集完成]
+    
+    %% 任务重新调度
+    CacheComplete --> RescheduleCacheCleanup[重新调度缓存清理]
+    ArchiveComplete --> RescheduleArchival[重新调度数据归档]
+    AchievementComplete --> RescheduleAchievement[重新调度成就检查]
+    LeaderboardComplete --> RescheduleLeaderboard[重新调度排行榜更新]
+    InventoryComplete --> RescheduleInventory[重新调度库存清理]
+    AuditComplete --> RescheduleAudit[重新调度货币审计]
+    HeartbeatComplete --> RescheduleHeartbeat[重新调度心跳任务]
+    StatsComplete --> RescheduleStats[重新调度统计收集]
+    
+    RescheduleCacheCleanup --> TaskQueue
+    RescheduleArchival --> TaskQueue
+    RescheduleAchievement --> TaskQueue
+    RescheduleLeaderboard --> TaskQueue
+    RescheduleInventory --> TaskQueue
+    RescheduleAudit --> TaskQueue
+    RescheduleHeartbeat --> TaskQueue
+    RescheduleStats --> TaskQueue
+    
+    %% 样式
+    classDef taskClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef execClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef checkClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef completeClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    
+    class CacheCleanup,DataArchival,AchievementCheck,LeaderboardUpdate,InventoryCleanup,CurrencyAudit,HeartbeatTask,StatsCollection taskClass
+    class CacheExec,ArchiveExec,AchievementExec,LeaderboardExec,InventoryExec,AuditExec,HeartbeatExec,StatsExec execClass
+    class HeartbeatResp checkClass
+    class CacheComplete,ArchiveComplete,AchievementComplete,LeaderboardComplete,InventoryComplete,AuditComplete,HeartbeatComplete,StatsComplete completeClass
+```
+
+## 8. 服务间通信流程图
+
+```mermaid
+sequenceDiagram
+    participant GameData as 游戏数据服务
+    participant Gateway as API网关
+    participant Auth as 认证服务
+    participant User as 用户服务
+    participant Game as 游戏服务
+    participant TimerMgr as 定时器管理器
+    
+    Note over GameData, Game: 服务启动注册流程
+    GameData->>GameData: 服务启动完成
+    GameData->>Gateway: POST /api/v1/services/register
+    Note right of GameData: 注册数据包含:<br/>- service_name: game_data_service<br/>- host: 0.0.0.0, port: 8083<br/>- health_check_path: /api/v1/health<br/>- api_endpoints列表
+    Gateway-->>GameData: 注册成功确认
+    
+    Note over GameData, Game: 服务间数据同步流程
+    Game->>Gateway: 游戏结束,更新用户数据
+    Gateway->>GameData: PUT /api/v1/profiles/user_12345
+    Note right of Gateway: 更新用户等级和经验值
+    GameData->>GameData: 验证和处理数据
+    GameData-->>Gateway: 档案更新成功
+    Gateway-->>Game: 确认数据更新
+    
+    GameData->>Gateway: 触发成就检查
+    Gateway->>GameData: POST /api/v1/achievements
+    Note right of Gateway: 解锁新成就
+    GameData->>GameData: 创建成就记录
+    GameData-->>Gateway: 成就解锁成功
+    
+    Note over GameData, Game: 定时心跳流程
+    loop 每30秒
+        TimerMgr->>Gateway: POST /api/v1/services/heartbeat
+        Note right of TimerMgr: 心跳数据包含:<br/>- service_name: game_data_service<br/>- status: healthy<br/>- metadata(组件状态)<br/>- metrics(游戏数据统计)
+        Gateway-->>TimerMgr: 心跳确认
+    end
+    
+    Note over GameData, Game: 认证集成流程
+    GameData->>Auth: 验证用户令牌
+    Auth-->>GameData: 令牌验证结果
+    GameData->>User: 获取用户基础信息
+    User-->>GameData: 用户信息响应
+    GameData->>GameData: 处理游戏数据请求
+    
+    Note over GameData, Game: 健康检查流程
+    Gateway->>GameData: GET /api/v1/health
+    GameData->>GameData: 检查组件状态
+    Note right of GameData: 检查:<br/>- MySQL连接池<br/>- Redis连接池<br/>- HTTP服务器<br/>- 定时器管理器<br/>- 线程池
+    GameData-->>Gateway: 健康状态响应
+    
+    Note over GameData, Game: 服务发现流程
+    Gateway->>GameData: GET /api/v1/service/endpoints
+    GameData-->>Gateway: 游戏数据服务端点列表
+    Note right of GameData: 包含所有游戏数据API<br/>和服务能力信息
+    
+    Note over GameData, Game: 跨服务数据流程
+    Game->>Gateway: 获取用户游戏档案
+    Gateway->>GameData: GET /api/v1/profiles/user_12345
+    GameData-->>Gateway: 用户档案数据
+    Gateway-->>Game: 转发档案信息
+    
+    Game->>Gateway: 更新排行榜分数
+    Gateway->>GameData: POST /api/v1/leaderboard
+    GameData->>GameData: 更新排行榜和重新计算排名
+    GameData-->>Gateway: 排行榜更新结果
+    Gateway-->>Game: 确认排名更新
+```
+
+## 9. 数据流向图
+
+```mermaid
+flowchart LR
+    subgraph External[外部系统]
+        direction TB
+        WebClient[Web客户端]
+        MobileClient[移动客户端]
+        GameServers[游戏服务器]
+    end
+    
+    subgraph Gateway[API网关层]
+        Router[路由器]
+        AuthMiddleware[认证中间件]
+        RateLimit[限流器]
+    end
+    
+    subgraph GameDataService[游戏数据服务层]
+        direction TB
+        Controller[HTTP控制器]
+        Validator[数据验证器]
+        BusinessLogic[业务逻辑层]
+        CacheManager[缓存管理器]
+        DataRepository[数据访问层]
+    end
+    
+    subgraph Storage[存储层]
+        direction TB
+        MySQL[(游戏数据库)]
+        Redis[(数据缓存)]
+        Archive[(归档存储)]
+    end
+    
+    subgraph ExternalServices[外部服务]
+        direction TB
+        AuthService[认证服务]
+        UserService[用户服务]
+        NotificationSvc[通知服务]
+    end
+    
+    subgraph Monitoring[监控层]
+        direction TB
+        Metrics[指标收集]
+        Logs[日志系统]
+        Health[健康检查]
+        Performance[性能监控]
+    end
+    
+    %% 数据流向
+    External --> Gateway
+    Gateway --> GameDataService
+    GameDataService --> Storage
+    GameDataService --> ExternalServices
+    GameDataService --> Monitoring
+    
+    %% 详细流向
+    WebClient -->|用户档案管理| Router
+    MobileClient -->|成就查询| Router
+    GameServers -->|分数更新| Router
+    
+    Router --> AuthMiddleware
+    AuthMiddleware --> RateLimit
+    RateLimit --> Controller
+    
+    Controller --> Validator
+    Validator --> BusinessLogic
+    BusinessLogic --> CacheManager
+    CacheManager -->|缓存未命中| DataRepository
+    DataRepository --> MySQL
+    BusinessLogic --> Redis
+    
+    Controller --> Metrics
+    BusinessLogic --> Logs
+    DataRepository --> Health
+    CacheManager --> Performance
+    
+    MySQL --> Archive
+    
+    BusinessLogic --> AuthService
+    BusinessLogic --> UserService
+    BusinessLogic --> NotificationSvc
+    
+    %% 反向数据流
+    MySQL -.->|查询结果| DataRepository
+    Redis -.->|缓存数据| CacheManager
+    DataRepository -.->|业务数据| BusinessLogic
+    BusinessLogic -.->|响应数据| Controller
+    Controller -.->|HTTP响应| Gateway
+    Gateway -.->|API响应| External
+    
+    AuthService -.->|认证结果| BusinessLogic
+    UserService -.->|用户信息| BusinessLogic
+    NotificationSvc -.->|通知确认| BusinessLogic
+    
+    %% 样式
+    classDef externalClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef gatewayClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef serviceClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef storageClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef externalSvcClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef monitorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    
+    class External externalClass
+    class Gateway gatewayClass
+    class GameDataService serviceClass
+    class Storage storageClass
+    class ExternalServices externalSvcClass
+    class Monitoring monitorClass
+```
+
+## 10. 错误处理流程图
+
+```mermaid
+flowchart TD
+    Request[接收游戏数据请求] --> ValidateInput{输入验证}
+    ValidateInput -->|无效JSON| BadRequest[400 Bad Request<br/>Invalid JSON]
+    ValidateInput -->|缺少字段| MissingFields[400 Bad Request<br/>Missing required field]
+    ValidateInput -->|有效| ProcessRequest[处理请求]
+    
+    ProcessRequest --> BusinessValidation{业务验证}
+    BusinessValidation -->|用户档案不存在| ProfileNotFound[404 Not Found<br/>User profile not found]
+    BusinessValidation -->|成就已解锁| AchievementExists[409 Conflict<br/>Achievement already unlocked]
+    BusinessValidation -->|库存不足| InsufficientInventory[400 Bad Request<br/>Insufficient inventory quantity]
+    BusinessValidation -->|货币不足| InsufficientCurrency[400 Bad Request<br/>Insufficient currency]
+    BusinessValidation -->|业务规则违反| BusinessRuleError[400 Bad Request<br/>Business rule violation]
+    BusinessValidation -->|验证通过| ProcessData[处理数据]
+    
+    ProcessData --> DatabaseOperation{数据库操作}
+    DatabaseOperation -->|连接失败| DBConnectionError[500 Internal Error<br/>Database connection failed]
+    DatabaseOperation -->|查询超时| DBTimeout[500 Internal Error<br/>Database timeout]
+    DatabaseOperation -->|约束违反| ConstraintViolation[409 Conflict<br/>Data constraint violation]
+    DatabaseOperation -->|事务失败| TransactionFailed[500 Internal Error<br/>Transaction failed]
+    DatabaseOperation -->|成功| Success[200 OK<br/>操作成功]
+    
+    ProcessData --> CacheOperation{缓存操作}
+    CacheOperation -->|Redis连接失败| CacheConnectionError[记录警告,继续处理]
+    CacheOperation -->|缓存超时| CacheTimeout[记录警告,继续处理]
+    CacheOperation -->|序列化失败| CacheSerializationError[记录警告,继续处理]
+    CacheOperation -->|成功| Success
+    
+    ProcessData --> ExternalServiceCall{外部服务调用}
+    ExternalServiceCall -->|认证服务不可用| AuthServiceDown[503 Service Unavailable<br/>Authentication service unavailable]
+    ExternalServiceCall -->|用户服务超时| UserServiceTimeout[500 Internal Error<br/>User service timeout]
+    ExternalServiceCall -->|API网关错误| GatewayError[500 Internal Error<br/>Gateway error]
+    ExternalServiceCall -->|成功| Success
+    
+    ProcessData --> ResourceValidation{资源验证}
+    ResourceValidation -->|内存不足| OutOfMemory[500 Internal Error<br/>Out of memory]
+    ResourceValidation -->|线程池满| ThreadPoolFull[503 Service Unavailable<br/>Thread pool exhausted]
+    ResourceValidation -->|磁盘空间不足| DiskSpaceLow[500 Internal Error<br/>Disk space low]
+    ResourceValidation -->|正常| Success
+    
+    ProcessData --> UnexpectedError{未预期错误}
+    UnexpectedError --> LogError[记录详细错误日志]
+    LogError --> InternalError[500 Internal Error<br/>Internal server error]
+    
+    %% 错误恢复机制
+    CacheConnectionError --> ProcessData
+    CacheTimeout --> ProcessData
+    CacheSerializationError --> ProcessData
+    
+    %% 重试机制
+    DBConnectionError --> RetryDB{重试数据库连接}
+    RetryDB -->|重试成功| ProcessData
+    RetryDB -->|重试失败| FinalDBError[500 Internal Error<br/>Database permanently unavailable]
+    
+    %% 降级机制
+    AuthServiceDown --> FallbackAuth[使用缓存认证]
+    FallbackAuth --> ProcessData
+    
+    %% 错误响应格式化
+    BadRequest --> FormatError[格式化错误响应]
+    MissingFields --> FormatError
+    ProfileNotFound --> FormatError
+    AchievementExists --> FormatError
+    InsufficientInventory --> FormatError
+    InsufficientCurrency --> FormatError
+    BusinessRuleError --> FormatError
+    DBConnectionError --> FormatError
+    DBTimeout --> FormatError
+    ConstraintViolation --> FormatError
+    TransactionFailed --> FormatError
+    AuthServiceDown --> FormatError
+    UserServiceTimeout --> FormatError
+    GatewayError --> FormatError
+    OutOfMemory --> FormatError
+    ThreadPoolFull --> FormatError
+    DiskSpaceLow --> FormatError
+    InternalError --> FormatError
+    FinalDBError --> FormatError
+    
+    FormatError --> ErrorResponse["统一错误响应<br/>{success: false, message: 错误描述, <br/>service: game_data_service, timestamp: time}"]
+    
+    Success --> SuccessResponse["成功响应<br/>{success: true, data: {...}, <br/>service: game_data_service, timestamp: time}"]
+    
+    ErrorResponse --> Client[返回给客户端]
+    SuccessResponse --> Client
+    
+    %% 错误监控和告警
+    LogError --> AlertSystem[告警系统]
+    AlertSystem --> NotifyOps[通知运维团队]
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef warningClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef recoveryClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    
+    class Request,ProcessRequest,ProcessData,FormatError processClass
+    class BadRequest,MissingFields,ProfileNotFound,AchievementExists,InsufficientInventory,InsufficientCurrency,BusinessRuleError,DBConnectionError,DBTimeout,ConstraintViolation,TransactionFailed,AuthServiceDown,UserServiceTimeout,GatewayError,OutOfMemory,ThreadPoolFull,DiskSpaceLow,InternalError,FinalDBError,ErrorResponse errorClass
+    class Success,SuccessResponse successClass
+    class CacheConnectionError,CacheTimeout,CacheSerializationError warningClass
+    class RetryDB,FallbackAuth recoveryClass
+```
+
+## 11. 游戏数据服务安全策略图
+
+```mermaid
+flowchart TD
+    subgraph SecurityLayers[安全层次]
+        direction TB
+        Transport[传输层安全<br/>HTTPS/TLS]
+        Authentication[身份认证层<br/>JWT Token验证]
+        Authorization[授权控制层<br/>API权限控制]
+        DataValidation[数据验证层<br/>输入输出验证]
+        DataProtection[数据保护层<br/>敏感数据加密]
+    end
+    
+    subgraph AccessControl[访问控制]
+        direction TB
+        TokenVerification[令牌验证<br/>与认证服务集成]
+        RateLimiting[访问限流<br/>防止滥用]
+        IPWhitelist[IP白名单<br/>可信来源]
+        APIKeyManagement[API密钥管理<br/>服务间认证]
+    end
+    
+    subgraph DataSecurity[数据安全]
+        direction TB
+        InputSanitization[输入清理<br/>防注入攻击]
+        OutputEncoding[输出编码<br/>防XSS攻击]
+        SQLInjectionPrevention[SQL注入防护<br/>参数化查询]
+        DataEncryption[敏感数据加密<br/>静态和传输加密]
+    end
+    
+    subgraph AuditAndMonitoring[审计和监控]
+        direction TB
+        AccessLogging[访问日志<br/>详细记录所有操作]
+        AnomalyDetection[异常检测<br/>可疑行为识别]
+        SecurityAlerts[安全告警<br/>实时威胁通知]
+        ComplianceReporting[合规报告<br/>安全审计支持]
+    end
+    
+    subgraph ThreatProtection[威胁防护]
+        direction TB
+        DDoSProtection[DDoS防护<br/>流量清洗]
+        BruteForceProtection[暴力破解防护<br/>登录限制]
+        DataLeakagePrevention[数据泄露防护<br/>敏感信息保护]
+        PrivacyProtection[隐私保护<br/>用户数据保护]
+    end
+    
+    %% 安全流程
+    Transport --> Authentication
+    Authentication --> Authorization
+    Authorization --> DataValidation
+    DataValidation --> DataProtection
+    
+    %% 访问控制关联
+    TokenVerification --> Authentication
+    RateLimiting --> Authorization
+    IPWhitelist --> Transport
+    APIKeyManagement --> Authentication
+    
+    %% 数据安全关联
+    InputSanitization --> DataValidation
+    OutputEncoding --> DataValidation
+    SQLInjectionPrevention --> DataProtection
+    DataEncryption --> DataProtection
+    
+    %% 审计监控关联
+    AccessLogging --> Authentication
+    AnomalyDetection --> Authorization
+    SecurityAlerts --> ThreatProtection
+    ComplianceReporting --> AuditAndMonitoring
+    
+    %% 威胁防护关联
+    DDoSProtection --> Transport
+    BruteForceProtection --> Authentication
+    DataLeakagePrevention --> DataProtection
+    PrivacyProtection --> DataProtection
+    
+    %% 样式
+    classDef securityClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef accessClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef dataClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef auditClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef protectionClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class SecurityLayers securityClass
+    class AccessControl accessClass
+    class DataSecurity dataClass
+    class AuditAndMonitoring auditClass
+    class ThreatProtection protectionClass
+```

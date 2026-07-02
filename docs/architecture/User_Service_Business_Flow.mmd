@@ -1,0 +1,491 @@
+
+# 用户核心服务业务流程图
+
+## 1. 用户服务整体架构图
+
+```mermaid
+graph TB
+    %% 外部系统
+    Client[客户端应用]
+    Gateway[API网关<br/>8080]
+    
+    %% 用户服务核心
+    subgraph UserService["用户核心服务 (8082)"]
+        direction TB
+        HTTP[HTTP服务器]
+        Controller[控制器层]
+        Service[业务逻辑层]
+        Repository[数据访问层]
+        TimerMgr[定时器管理器]
+        ThreadPool[线程池]
+    end
+    
+    %% 数据存储
+    MySQL[(MySQL数据库<br/>user_service_db)]
+    Redis[(Redis缓存)]
+    
+    %% 其他服务
+    AuthSvc[认证服务<br/>8081]
+    GameSvc[游戏服务<br/>8084]
+    
+    %% 连接关系
+    Client -->|HTTP请求| Gateway
+    Gateway -->|路由转发| HTTP
+    HTTP --> Controller
+    Controller --> Service
+    Service --> Repository
+    Repository --> MySQL
+    Repository --> Redis
+    
+    %% 服务间通信
+    Gateway <-.->|服务注册/心跳| TimerMgr
+    AuthSvc -.->|用户验证查询| HTTP
+    GameSvc -.->|用户信息查询| HTTP
+    
+    %% 定时任务
+    TimerMgr -.->|统计任务| Service
+    TimerMgr -.->|缓存清理| Repository
+    TimerMgr -.->|健康检查| Service
+    TimerMgr -.->|心跳发送| Gateway
+    
+    %% 线程池支持
+    ThreadPool -.-> HTTP
+    ThreadPool -.-> TimerMgr
+    
+    %% 样式
+    classDef serviceClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef dbClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef externalClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    
+    class UserService serviceClass
+    class MySQL,Redis dbClass
+    class Client,Gateway,AuthSvc,GameSvc externalClass
+```
+
+## 2. 用户服务启动流程图
+
+```mermaid
+flowchart TD
+    Start([服务启动]) --> LoadConfig[加载配置文件]
+    LoadConfig --> ValidateConfig{配置验证}
+    ValidateConfig -->|失败| Error[启动失败]
+    ValidateConfig -->|成功| InitDB[初始化数据库连接池]
+    
+    InitDB --> TestMySQL{测试MySQL连接}
+    TestMySQL -->|失败| Error
+    TestMySQL -->|成功| TestRedis{测试Redis连接}
+    TestRedis -->|失败| Error
+    TestRedis -->|成功| InitRepo[初始化数据访问层]
+    
+    InitRepo --> InitThreadPool[初始化线程池]
+    InitThreadPool --> InitTimer[初始化定时器管理器]
+    InitTimer --> StartTimer{启动定时器}
+    StartTimer -->|失败| Error
+    StartTimer -->|成功| InitHTTP[初始化HTTP服务器]
+    
+    InitHTTP --> SetupRoutes[设置路由]
+    SetupRoutes --> StartHTTP{启动HTTP服务器}
+    StartHTTP -->|失败| Error
+    StartHTTP -->|成功| SetupTasks[设置定时任务]
+    
+    SetupTasks --> Task1[统计任务<br/>每小时]
+    SetupTasks --> Task2[缓存清理<br/>每30分钟]
+    SetupTasks --> Task3[状态检查<br/>每10分钟]
+    SetupTasks --> Task4[健康检查<br/>每5分钟]
+    SetupTasks --> Task5[心跳任务<br/>每30秒]
+    
+    Task1 --> RegisterGateway[注册到API网关]
+    Task2 --> RegisterGateway
+    Task3 --> RegisterGateway
+    Task4 --> RegisterGateway
+    Task5 --> RegisterGateway
+    
+    RegisterGateway --> GatewayReg{网关注册}
+    GatewayReg -->|失败| Warning[记录警告,继续启动]
+    GatewayReg -->|成功| Success[服务启动成功]
+    Warning --> Success
+    
+    Success --> Running[服务运行中]
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class LoadConfig,InitDB,InitRepo,InitThreadPool,InitTimer,InitHTTP,SetupRoutes,SetupTasks,RegisterGateway processClass
+    class ValidateConfig,TestMySQL,TestRedis,StartTimer,StartHTTP,GatewayReg decisionClass
+    class Error errorClass
+    class Success,Running successClass
+```
+
+## 3. 用户管理业务流程图
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant Gateway as API网关
+    participant Controller as 控制器
+    participant Service as 业务服务
+    participant Repository as 数据访问层
+    participant MySQL as MySQL数据库
+    participant Redis as Redis缓存
+    
+    Note over Client, Redis: 用户创建流程
+    Client->>Gateway: POST /api/v1/users
+    Gateway->>Controller: 转发请求
+    Controller->>Controller: 解析JSON数据
+    Controller->>Service: 调用createUser()
+    Service->>Service: 验证用户数据
+    Service->>Repository: 检查用户名存在性
+    Repository->>MySQL: SELECT username
+    MySQL-->>Repository: 查询结果
+    Repository-->>Service: 用户名检查结果
+    Service->>Repository: 检查邮箱存在性
+    Repository->>MySQL: SELECT email
+    MySQL-->>Repository: 查询结果
+    Repository-->>Service: 邮箱检查结果
+    Service->>Repository: createUser()
+    Repository->>MySQL: INSERT用户数据
+    MySQL-->>Repository: 插入结果
+    Repository->>Redis: 清除相关缓存
+    Repository-->>Service: 创建结果
+    Service-->>Controller: 返回用户ID
+    Controller-->>Gateway: 返回成功响应
+    Gateway-->>Client: 201 Created
+    
+    Note over Client, Redis: 用户查询流程(带缓存)
+    Client->>Gateway: GET /api/v1/users/:user_id
+    Gateway->>Controller: 转发请求
+    Controller->>Service: 调用getUserById()
+    Service->>Repository: getUserById()
+    Repository->>Redis: 查询缓存
+    Redis-->>Repository: 缓存未命中
+    Repository->>MySQL: SELECT用户数据
+    MySQL-->>Repository: 用户数据
+    Repository->>Redis: 缓存用户数据
+    Repository-->>Service: 返回用户数据
+    Service-->>Controller: 用户信息
+    Controller-->>Gateway: 200 OK + 用户数据
+    Gateway-->>Client: 用户信息响应
+    
+    Note over Client, Redis: 用户更新流程
+    Client->>Gateway: PUT /api/v1/users/:user_id
+    Gateway->>Controller: 转发请求
+    Controller->>Service: 调用updateUser()
+    Service->>Repository: 获取现有用户
+    Repository->>MySQL: SELECT现有数据
+    MySQL-->>Repository: 现有用户数据
+    Repository-->>Service: 现有数据
+    Service->>Service: 验证更新数据
+    Service->>Repository: updateUser()
+    Repository->>MySQL: UPDATE用户数据
+    MySQL-->>Repository: 更新结果
+    Repository->>Redis: 清除相关缓存
+    Repository-->>Service: 更新结果
+    Service-->>Controller: 更新后数据
+    Controller-->>Gateway: 200 OK + 更新数据
+    Gateway-->>Client: 更新成功响应
+```
+
+## 4. 服务间通信流程图
+
+```mermaid
+sequenceDiagram
+    participant UserSvc as 用户服务
+    participant Gateway as API网关
+    participant AuthSvc as 认证服务
+    participant GameSvc as 游戏服务
+    participant TimerMgr as 定时器管理器
+    
+    Note over UserSvc, GameSvc: 服务启动注册流程
+    UserSvc->>UserSvc: 服务启动完成
+    UserSvc->>Gateway: POST /api/v1/services/register
+    Note right of UserSvc: 注册数据包含:<br/>- service_name<br/>- host, port<br/>- health_check_url<br/>- api_endpoints
+    Gateway-->>UserSvc: 注册成功确认
+    
+    Note over UserSvc, GameSvc: 定时心跳流程
+    loop 每30秒
+        TimerMgr->>Gateway: POST /api/v1/services/heartbeat
+        Note right of TimerMgr: 心跳数据包含:<br/>- service_name<br/>- host, port<br/>- status: healthy<br/>- metadata(组件状态)
+        Gateway-->>TimerMgr: 心跳确认
+    end
+    
+    Note over UserSvc, GameSvc: 服务间调用流程
+    AuthSvc->>Gateway: 用户登录验证请求
+    Gateway->>UserSvc: GET /api/v1/users/by-username/:username
+    UserSvc-->>Gateway: 用户信息响应
+    Gateway-->>AuthSvc: 转发用户信息
+    
+    GameSvc->>Gateway: 获取玩家档案请求
+    Gateway->>UserSvc: GET /api/v1/users/:user_id/profile
+    UserSvc-->>Gateway: 用户档案响应
+    Gateway-->>GameSvc: 转发档案信息
+    
+    Note over UserSvc, GameSvc: 健康检查流程
+    Gateway->>UserSvc: GET /health
+    UserSvc->>UserSvc: 检查组件状态
+    Note right of UserSvc: 检查:<br/>- MySQL连接<br/>- Redis连接<br/>- HTTP服务器<br/>- 定时器管理器
+    UserSvc-->>Gateway: 健康状态响应
+    
+    Note over UserSvc, GameSvc: 服务发现流程
+    Gateway->>UserSvc: GET /api/v1/service/endpoints
+    UserSvc-->>Gateway: 服务端点列表
+    Note right of UserSvc: 包含所有API端点<br/>和服务能力信息
+```
+
+## 5. 定时任务执行流程图
+
+```mermaid
+flowchart TD
+    subgraph TimerWheel[时间轮调度器]
+        direction TB
+        Scheduler[HierarchicalTimingWheel<br/>层次化时间轮]
+        TaskQueue[任务队列]
+        Executor[任务执行器]
+    end
+    
+    subgraph Tasks[定时任务类型]
+        direction TB
+        StatTask[统计任务<br/>每小时执行]
+        CacheTask[缓存清理<br/>每30分钟执行]
+        StatusTask[状态检查<br/>每10分钟执行]
+        HealthTask[健康检查<br/>每5分钟执行]
+        HeartbeatTask[心跳任务<br/>每30秒执行]
+    end
+    
+    Start([定时器启动]) --> Scheduler
+    Scheduler --> TaskQueue
+    TaskQueue --> Executor
+    
+    %% 任务注册
+    StatTask --> Scheduler
+    CacheTask --> Scheduler
+    StatusTask --> Scheduler
+    HealthTask --> Scheduler
+    HeartbeatTask --> Scheduler
+    
+    %% 统计任务流程
+    Executor -->|执行| StatExec[统计任务执行]
+    StatExec --> GetStats[收集服务统计]
+    GetStats --> LogStats[记录统计日志]
+    LogStats --> StatComplete[任务完成]
+    
+    %% 缓存清理任务流程
+    Executor -->|执行| CacheExec[缓存清理执行]
+    CacheExec --> CleanExpired[清理过期缓存]
+    CleanExpired --> CacheComplete[任务完成]
+    
+    %% 状态检查任务流程
+    Executor -->|执行| StatusExec[状态检查执行]
+    StatusExec --> CheckUserStats[检查用户统计]
+    CheckUserStats --> DetectAnomalies[检测异常状态]
+    DetectAnomalies --> LogWarnings[记录警告]
+    LogWarnings --> StatusComplete[任务完成]
+    
+    %% 健康检查任务流程
+    Executor -->|执行| HealthExec[健康检查执行]
+    HealthExec --> CheckMySQL{检查MySQL}
+    CheckMySQL -->|健康| CheckRedis{检查Redis}
+    CheckMySQL -->|异常| LogHealthError[记录健康异常]
+    CheckRedis -->|健康| CheckHTTP{检查HTTP}
+    CheckRedis -->|异常| LogHealthError
+    CheckHTTP -->|健康| CheckTimer{检查定时器}
+    CheckHTTP -->|异常| LogHealthError
+    CheckTimer -->|健康| HealthComplete[健康检查完成]
+    CheckTimer -->|异常| LogHealthError
+    LogHealthError --> HealthComplete
+    
+    %% 心跳任务流程
+    Executor -->|执行| HeartbeatExec[心跳任务执行]
+    HeartbeatExec --> BuildHeartbeat[构建心跳数据]
+    BuildHeartbeat --> SendHeartbeat[发送到API网关]
+    SendHeartbeat --> HeartbeatResp{心跳响应}
+    HeartbeatResp -->|成功| LogSuccess[记录成功日志]
+    HeartbeatResp -->|失败| LogFailure[记录失败日志]
+    LogSuccess --> HeartbeatComplete[心跳完成]
+    LogFailure --> HeartbeatComplete
+    
+    %% 任务重新调度
+    StatComplete --> RescheduleStats[重新调度统计任务]
+    CacheComplete --> RescheduleCache[重新调度缓存任务]
+    StatusComplete --> RescheduleStatus[重新调度状态任务]
+    HealthComplete --> RescheduleHealth[重新调度健康任务]
+    HeartbeatComplete --> RescheduleHeartbeat[重新调度心跳任务]
+    
+    RescheduleStats --> TaskQueue
+    RescheduleCache --> TaskQueue
+    RescheduleStatus --> TaskQueue
+    RescheduleHealth --> TaskQueue
+    RescheduleHeartbeat --> TaskQueue
+    
+    %% 样式
+    classDef taskClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef execClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef checkClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef completeClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class StatTask,CacheTask,StatusTask,HealthTask,HeartbeatTask taskClass
+    class StatExec,CacheExec,StatusExec,HealthExec,HeartbeatExec execClass
+    class CheckMySQL,CheckRedis,CheckHTTP,CheckTimer,HeartbeatResp checkClass
+    class StatComplete,CacheComplete,StatusComplete,HealthComplete,HeartbeatComplete completeClass
+```
+
+## 6. 数据流向图
+
+```mermaid
+flowchart LR
+    subgraph External[外部系统]
+        direction TB
+        WebApp[Web应用]
+        MobileApp[移动应用]
+        OtherSvc[其他微服务]
+    end
+    
+    subgraph Gateway[API网关层]
+        Router[路由器]
+        Auth[认证中间件]
+        RateLimit[限流器]
+    end
+    
+    subgraph UserService[用户服务层]
+        direction TB
+        Controller[HTTP控制器]
+        Validator[数据验证器]
+        BusinessLogic[业务逻辑]
+        Cache[缓存层]
+        Persistence[持久化层]
+    end
+    
+    subgraph Storage[存储层]
+        direction TB
+        MySQL[(主数据库)]
+        Redis[(缓存数据库)]
+        Backup[(备份存储)]
+    end
+    
+    subgraph Monitoring[监控层]
+        direction TB
+        Metrics[指标收集]
+        Logs[日志系统]
+        Health[健康检查]
+    end
+    
+    %% 数据流向
+    External --> Gateway
+    Gateway --> UserService
+    UserService --> Storage
+    UserService --> Monitoring
+    
+    %% 详细流向
+    WebApp -->|用户注册/登录| Router
+    MobileApp -->|个人资料更新| Router
+    OtherSvc -->|用户信息查询| Router
+    
+    Router --> Auth
+    Auth --> RateLimit
+    RateLimit --> Controller
+    
+    Controller --> Validator
+    Validator --> BusinessLogic
+    BusinessLogic --> Cache
+    Cache -->|缓存未命中| Persistence
+    Persistence --> MySQL
+    BusinessLogic --> Redis
+    
+    Controller --> Metrics
+    BusinessLogic --> Logs
+    Persistence --> Health
+    
+    MySQL --> Backup
+    
+    %% 反向数据流
+    MySQL -.->|查询结果| Persistence
+    Redis -.->|缓存数据| Cache
+    Persistence -.->|业务数据| BusinessLogic
+    BusinessLogic -.->|响应数据| Controller
+    Controller -.->|HTTP响应| Gateway
+    Gateway -.->|API响应| External
+    
+    %% 样式
+    classDef externalClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef gatewayClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef serviceClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef storageClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef monitorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    
+    class External externalClass
+    class Gateway gatewayClass
+    class UserService serviceClass
+    class Storage storageClass
+    class Monitoring monitorClass
+```
+
+## 7. 错误处理流程图
+
+```mermaid
+flowchart TD
+    Request[接收请求] --> ValidateInput{输入验证}
+    ValidateInput -->|无效| BadRequest[400 Bad Request<br/>INVALID_JSON/MISSING_FIELDS]
+    ValidateInput -->|有效| ProcessRequest[处理请求]
+    
+    ProcessRequest --> BusinessLogic{业务逻辑执行}
+    BusinessLogic -->|用户不存在| NotFound[404 Not Found<br/>USER_NOT_FOUND]
+    BusinessLogic -->|权限不足| Forbidden[403 Forbidden<br/>PERMISSION_DENIED]
+    BusinessLogic -->|业务验证失败| ValidationError[400 Bad Request<br/>VALIDATION_ERROR]
+    BusinessLogic -->|成功| Success[200 OK<br/>返回成功数据]
+    
+    ProcessRequest --> DatabaseOperation{数据库操作}
+    DatabaseOperation -->|连接失败| DBError[500 Internal Error<br/>DATABASE_CONNECTION_ERROR]
+    DatabaseOperation -->|超时| Timeout[500 Internal Error<br/>DATABASE_TIMEOUT]
+    DatabaseOperation -->|约束冲突| Conflict[409 Conflict<br/>USERNAME_EXISTS/EMAIL_EXISTS]
+    DatabaseOperation -->|成功| Success
+    
+    ProcessRequest --> CacheOperation{缓存操作}
+    CacheOperation -->|Redis连接失败| CacheError[记录警告,继续处理]
+    CacheOperation -->|缓存超时| CacheTimeout[记录警告,继续处理]
+    CacheOperation -->|成功| Success
+    
+    ProcessRequest --> ExternalCall{外部服务调用}
+    ExternalCall -->|API网关不可用| ServiceUnavailable[503 Service Unavailable<br/>GATEWAY_UNAVAILABLE]
+    ExternalCall -->|调用超时| ExternalTimeout[500 Internal Error<br/>EXTERNAL_SERVICE_TIMEOUT]
+    ExternalCall -->|成功| Success
+    
+    ProcessRequest --> UnexpectedError{未预期错误}
+    UnexpectedError --> LogError[记录错误日志]
+    LogError --> InternalError[500 Internal Error<br/>INTERNAL_ERROR]
+    
+    %% 错误恢复
+    CacheError --> ProcessRequest
+    CacheTimeout --> ProcessRequest
+    
+    %% 错误响应格式化
+    BadRequest --> FormatError[格式化错误响应]
+    NotFound --> FormatError
+    Forbidden --> FormatError
+    ValidationError --> FormatError
+    DBError --> FormatError
+    Timeout --> FormatError
+    Conflict --> FormatError
+    ServiceUnavailable --> FormatError
+    ExternalTimeout --> FormatError
+    InternalError --> FormatError
+    
+    FormatError --> ErrorResponse["错误响应<br/>{error: true, error_code: CODE, <br/>error_message: 描述, timestamp: time}"]
+    
+    Success --> SuccessResponse["成功响应<br/>{success: true, data: {...}, <br/>timestamp: time}"]
+    
+    ErrorResponse --> Client[返回给客户端]
+    SuccessResponse --> Client
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef warningClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    
+    class Request,ProcessRequest,FormatError processClass
+    class BadRequest,NotFound,Forbidden,ValidationError,DBError,Timeout,Conflict,ServiceUnavailable,ExternalTimeout,InternalError,ErrorResponse errorClass
+    class Success,SuccessResponse successClass
+    class CacheError,CacheTimeout warningClass
+```

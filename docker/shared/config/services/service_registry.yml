@@ -1,0 +1,82 @@
+# =============================================================================
+# Service Registry Configuration - Docker Container Version
+# 服务注册中心配置文件 - Docker 容器版本
+# 版本: 1.0.0
+# 说明: 使用环境变量配置，适配 Docker 容器环境
+# =============================================================================
+
+# 服务基本信息
+name: "service_registry"
+version: "1.0.0"
+environment: "${ENVIRONMENT}"
+
+# Redis 配置 (使用环境变量)
+redis:
+  host: "${REDIS_HOST}"
+  port: ${REDIS_EXTERNAL_PORT}
+  password: "${REDIS_PASSWORD}"
+  database: ${REDIS_DATABASE}
+  pool_size: ${REDIS_POOL_SIZE}
+  connection_timeout_ms: 5000
+  socket_timeout_ms: 3000
+  max_idle_time_ms: 30000
+
+# HTTP 服务器配置
+http:
+  host: "0.0.0.0"
+  port: ${SERVICE_REGISTRY_INTERNAL_PORT}
+  thread_count: ${WORKER_THREADS}
+  max_connections: 1000
+  keep_alive_timeout_s: 60
+  request_timeout_s: 30
+
+# 注册中心配置
+registry:
+  # 服务 TTL（秒）- 心跳超时后服务将被自动注销
+  service_ttl_s: 60
+
+  # 心跳超时（秒）- 超过此时间未收到心跳，标记为不健康
+  heartbeat_timeout_s: 90
+
+  # 心跳警告阈值（秒）- 超过此时间开始降低健康分数
+  heartbeat_warning_threshold_s: 30
+
+  # 清理间隔（秒）- 定期清理过期服务
+  cleanup_interval_s: 30
+
+  # 健康检查间隔（秒）- 定期更新服务健康状态
+  health_check_interval_s: 15
+
+  # 统计更新间隔（秒）
+  stats_update_interval_s: 60
+
+  # 响应时间阈值（毫秒）- 超过此阈值开始降低健康分数
+  response_time_threshold_ms: 500
+
+  # 最大候选服务数（用于推荐）
+  max_recommendation_candidates: 10
+
+  # 是否启用事件发布
+  enable_events: true
+
+  # 是否启用本地缓存
+  enable_local_cache: true
+
+  # 本地缓存大小
+  local_cache_size: 1000
+
+  # 本地缓存 TTL（秒）
+  local_cache_ttl_s: 5
+
+# 日志配置
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: true
+    path: "/app/logs/service_registry.log"
+    max_size: 536870912    # 512 MB
+    max_files: 5
+  async:
+    enabled: false
+  level: "${LOG_LEVEL}"

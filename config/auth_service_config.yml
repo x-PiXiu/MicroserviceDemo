@@ -1,0 +1,484 @@
+# 认证服务配置文件
+# Game Microservices Auth Service Configuration
+# 版本: 1.0.0
+# 作者: 29108
+# 日期: 2025/7/21
+#
+# 基于FINAL_ARCHITECTURE_DECISION.md和KAFKA_INTEGRATION_ANALYSIS.md的架构设计
+# 与API Gateway协作，专注于认证业务逻辑，支持事件驱动的实时状态更新
+
+# ==================== 服务基础配置 ====================
+service:
+  name: "auth_service"
+  version: "2.0.0"
+  description: "认证核心服务 - 管理用户登录认证"
+  environment: "development"
+
+# ==================== 服务器配置 ====================
+server_host: "0.0.0.0"
+server_port: 8083
+
+# ==================== 网络配置 ====================
+network:
+  host: "0.0.0.0"
+  port: 8083
+  worker_threads: 20
+  io_threads: 4
+  max_connections: 1000
+  connection_timeout: 30
+  keep_alive_timeout: 30
+  send_buffer_size: 1024
+  recv_buffer_size: 1024
+  read_timeout: 60
+  write_timeout: 60
+  backlog: 1024
+  reuse_address: true
+  reuse_port: true
+  tcp_no_delay: true
+  keep_alive: true
+  enable_epoll: true
+  enable_thread_pool: true          # 启用线程池异步处理HTTP请求，避免阻塞IO线程
+
+
+
+# ==================== 数据库配置 ====================
+mysql:
+  # --- 基础连接信息 ---
+  host: "127.0.0.1"                   # MySQL 服务器主机名或IP地址
+  port: 3306                          # MySQL 服务端口
+  username: "root"                    # 登录用户名
+  password: "013ee244b29700ed"                  # 登录密码（生产环境建议使用密钥管理或环境变量）
+  database: "auth_sessions_db"         # 默认连接的数据库名
+  charset: "utf8mb4"                  # 客户端字符集（推荐 utf8mb4 支持 Emoji 和完整 Unicode）
+  collation: "utf8mb4_general_ci"     # 字符校对规则（区分大小写、排序规则等）
+
+  # --- 连接池配置 ---
+  pool:
+    initial_size: 5                   # 启动时初始化的连接数
+    max_size: 20                      # 连接池最大连接数（超过将等待或拒绝）
+    min_size: 2                       # 连接池保持的最小空闲连接数
+    max_idle: 10                      # 最大空闲连接数（超过将被回收）
+    max_wait_time: 5000               # 获取连接的最大等待时间（毫秒），超时抛异常
+    max_idle_time_ms: 600000          # 连接最大空闲时间（毫秒），超时自动回收（10分钟）
+    validation_query: "SELECT 1"      # 用于验证连接是否有效的SQL语句
+    validation_interval_ms: 30000     # 空闲连接检测间隔（毫秒，30秒）
+    test_on_borrow: true              # 借出连接前是否验证有效性
+    test_on_return: false             # 归还连接时是否验证有效性
+    test_while_idle: true             # 空闲时是否定期验证连接有效性
+
+  # ========== 适配代码配置键名 ==========
+
+  # --- 连接与重连参数 ---
+  mysql_connect_timeout_ms: 5000      # 连接超时时间（毫秒），0表示无限等待
+  mysql_read_timeout_ms: 5000         # 读取数据超时时间（毫秒）
+  mysql_write_timeout_ms: 5000        # 写入数据超时时间（毫秒）
+  mysql_auto_reconnect: true          # 是否自动重连（断开后尝试恢复）
+  mysql_max_reconnect_attempts: 3     # 最大重连尝试次数
+  mysql_reconnect_interval_ms: 1000   # 重连间隔时间（毫秒）
+
+  # --- SSL 安全连接配置 ---
+  mysql_use_ssl: false                # 是否启用 SSL 加密连接
+  mysql_ssl_ca: ""                    # CA 证书路径（用于验证服务端证书）
+  mysql_ssl_cert: ""                  # 客户端证书路径（双向认证时使用）
+  mysql_ssl_key: ""                   # 客户端私钥路径（双向认证时使用）
+  mysql_ssl_cipher: ""                # 指定加密套件（如 "AES256-SHA"）
+  mysql_ssl_verify_server_cert: false # 是否验证服务端证书域名（生产环境建议开启）
+
+  # --- 性能调优参数 ---
+  mysql_max_allowed_packet: 67108864  # 最大允许的包大小（字节），默认 64MB，防止大数据包失败
+  mysql_net_buffer_length: 16384      # 网络缓冲区初始大小（字节），默认 16KB
+  mysql_compress: false               # 是否启用网络传输压缩（节省带宽，增加CPU开销）
+  mysql_init_command: ""              # 连接建立后执行的初始化SQL（如 "SET time_zone='+08:00'"）
+
+  # --- 事务与隔离级别配置 ---
+  mysql_isolation_level: "REPEATABLE-READ"  # 事务隔离级别：READ-UNCOMMITTED, READ-COMMITTED, REPEATABLE-READ, SERIALIZABLE
+  mysql_autocommit: true              # 是否自动提交事务（false 时需手动 commit/rollback）
+  mysql_lock_wait_timeout: 50000      # 行锁等待超时时间（毫秒），默认 50 秒，超时抛 Lock wait timeout 错误
+
+# ==================== Redis 配置 ====================
+redis:
+  # --- 基础连接信息 ---
+  host: "127.0.0.1"                       # Redis 服务器主机名或IP地址
+  port: 6379                          # Redis 服务端口
+  password: "123456"                  # 认证密码（生产环境建议使用密钥管理）
+  database: 0                         # 使用的数据库编号（0-15，默认0）
+
+  # --- 连接池配置 ---
+  pool_size: 5                        # 初始连接池大小（启动时创建）
+  max_pool_size: 20                   # 最大连接数（超过将等待或拒绝）
+  min_pool_size: 2                    # 最小空闲连接数（维持连接保活）
+  pool_timeout_ms: 5000               # 获取连接最大等待时间（毫秒）
+  pool_max_idle_time_ms: 600000       # 连接最大空闲时间（毫秒，10分钟超时回收）
+  pool_test_on_borrow: true           # 借出前是否测试连接有效性
+  pool_test_on_return: false          # 归还时是否测试连接有效性
+  # test_while_idle: true             # （保留）空闲时是否测试（代码未使用，可选保留）
+
+  # --- 连接超时与网络参数 ---
+  connect_timeout_ms: 2000            # 建立连接超时时间（毫秒）
+  socket_timeout_ms: 3000             # Socket 读写超时（毫秒）
+  command_timeout_ms: 3000            # 单条命令执行超时（毫秒）
+  tcp_keepalive: false                # 是否启用 TCP KeepAlive
+  tcp_keepalive_idle: 60              # KeepAlive 空闲时间（秒）
+  tcp_keepalive_interval: 30          # KeepAlive 探测间隔（秒）
+  tcp_keepalive_count: 3              # KeepAlive 探测失败次数上限
+
+  # --- 重连与重试机制 ---
+  auto_reconnect: true                # 连接断开后是否自动重连
+  max_reconnect_attempts: 3           # 最大重连尝试次数
+  reconnect_interval_ms: 1000         # 重连间隔（毫秒）
+  retry_attempts: 2                   # 命令失败后重试次数
+  retry_delay_ms: 500                 # 命令重试间隔（毫秒）
+
+  # --- 集群模式配置 ---
+  cluster_enabled: false              # 是否启用 Redis Cluster 模式
+  cluster_max_redirections: 5         # 最大重定向次数（避免无限循环）
+  cluster_require_full_coverage: true # 是否要求所有哈希槽都可用才接受请求
+
+  # --- 哨兵模式配置 ---
+  sentinel_enabled: false             # 是否启用 Redis Sentinel 高可用模式
+  sentinel_master_name: "mymaster"    # Sentinel 监控的主节点名称
+  sentinel_password: ""               # Sentinel 认证密码（如配置了 requirepass）
+  sentinel_timeout_ms: 5000           # Sentinel 连接超时（毫秒）
+
+  # --- SSL/TLS 安全连接 ---
+  use_ssl: false                      # 是否启用 SSL/TLS 加密连接
+  ssl_cert_file: ""                   # 客户端证书文件路径（双向认证）
+  ssl_key_file: ""                    # 客户端私钥文件路径
+  ssl_ca_file: ""                     # CA 证书路径（用于验证服务端）
+  ssl_verify_peer: false              # 是否验证服务端证书有效性
+  ssl_ciphers: ""                     # 指定加密套件（如 "AES256-SHA"）
+
+  # --- 性能优化配置 ---
+  pipeline_size: 10                   # 管道批量操作的默认大小
+  enable_pipeline: false              # 是否默认启用管道（批量命令优化）
+  max_memory_policy: 0                # 内存淘汰策略（0=默认 noeviction，1=allkeys-lru...）
+  compress_data: false                # 是否压缩存储的数据（节省内存，增加CPU开销）
+
+  # --- 业务缓存 TTL 配置（非驱动层，业务层使用）---
+  cache:
+    default_ttl: 300                  # 默认缓存过期时间（秒）
+    user_info_ttl: 300                # 用户基本信息缓存过期时间（秒）
+    user_profile_ttl: 600             # 用户档案缓存过期时间（秒）
+    user_preferences_ttl: 1800        # 用户偏好设置缓存过期时间（秒）
+
+
+# ==================== 线程池配置 ====================
+thread_pool:
+  # --- 核心参数 ---
+  core_size: 20                       # 核心线程数（匹配CPU核心数）
+  max_size: 40                        # 最大线程数（任务堆积时可临时扩展至此数量）
+  keep_alive_ms: 60000                # 非核心线程空闲存活时间（毫秒，60秒后回收）
+  queue_capacity: 1024                # 任务队列容量（超过则触发拒绝策略）
+
+  # --- 行为策略 ---
+  allow_core_timeout: false           # 是否允许核心线程超时退出（false=永不退出）
+  rejection_policy: "caller_runs"           # 任务拒绝策略：abort（抛异常）, caller_runs, discard, discard_oldest
+  prestart_core_threads: false        # 是否在启动时预创建所有核心线程（true=立即创建，false=按需创建）
+
+  # --- 线程属性 ---
+  thread_priority: 5                  # 线程优先级（1~10，5=正常，越高CPU调度越频繁）
+  name_prefix: "auth-service-"        # 线程名称前缀，便于调试和监控（如 "user-service-1"）
+
+  # --- 监控配置 ---
+  enable_monitoring: false            # 是否启用线程池运行时监控（如队列大小、活跃线程数等）
+  monitoring_interval_ms: 5000        # 监控日志/指标采集间隔（毫秒，5秒）
+
+
+# ==================== 外部服务配置 ====================
+external_services:
+  user_service:
+    base_url: "http://127.0.0.1:8082"           # 用户服务基础URL（支持负载均衡地址如 http://user-service:8082）
+    timeout_seconds: 5                          # 单次请求超时时间（秒）
+    retry_count: 3                              # 请求失败重试次数（0=不重试）
+    cache_ttl_seconds: 300                      # 本地缓存用户数据的TTL（秒），300=5分钟
+    cache:
+      enable: true                              # 是否启用本地缓存（减少对下游服务的调用）
+
+
+  # ==================== Kafka配置 ====================
+kafka:
+  enable: false                                # 是否启用 Kafka 功能
+  topic_prefix: "game_microservices"          # 主题名称前缀，用于环境/项目隔离
+
+  # ========== Producer 配置 ==========
+  producer:
+    brokers: "172.25.133.37:9092"                     # Kafka 集群地址列表
+    client_id: ""                             # 生产者客户端标识（可空）
+    acks: -1                               # 确认机制：所有副本写入成功才算成功 -1/0/1   all = -1
+    retries: 3                                # 发送失败时自动重试次数
+    batch_size: 16384                         # 批量发送的消息缓冲大小（字节）
+    linger_ms: 1                              # 批处理等待更多消息的最长时间（毫秒）
+    buffer_memory: 33554432                   # 生产者本地缓存总内存上限（字节）
+    compression_type: "snappy"                  # 消息压缩算法（如 none、gzip、snappy）
+    max_request_size: 1048576                 # 单个请求最大体积（字节）
+    request_timeout_ms: 30000                 # 请求响应超时时间（毫秒）
+    delivery_timeout_ms: 120000               # 消息从发送到确认的总超时时间
+    enable_idempotence: true                  # 启用幂等性，防止重复消息
+    max_in_flight_requests: 5                 # 每个连接最多并发发送请求数
+
+    # 安全配置
+    security_protocol: "PLAINTEXT"            # 安全协议类型（PLAINTEXT/SASL_SSL/SSL）
+    sasl:
+      mechanism: "PLAIN"                      # SASL 认证机制（如 PLAIN, SCRAM）
+      username: ""                            # SASL 认证用户名
+      password: ""                            # SASL 认证密码
+    ssl:
+      ca_location: ""                         # CA 根证书路径（用于验证服务端）
+      certificate_location: ""                # 客户端证书路径（双向认证）
+      key_location: ""                        # 客户端私钥路径
+      key_password: ""                        # 私钥解密密码（如有）
+
+  # ========== Consumer 配置 ==========
+  consumer:
+    brokers: "172.25.133.37:9092"                     # Kafka 集群地址列表
+    group_id: "auth_service_cluster"          # 消费者组 ID，同组共享分区负载
+    client_id: ""                             # 消费者客户端标识（可空）
+    auto_offset_reset: "latest"               # 偏移量无效时从最新消息开始消费
+    enable_auto_commit: true                  # 是否自动提交消费偏移量
+    auto_commit_interval_ms: 1000             # 自动提交偏移量的时间间隔（毫秒）
+    session_timeout_ms: 30003                 # 组会话超时时间，超时则触发 rebalance
+    heartbeat_interval_ms: 10000              # 向协调者发送心跳的间隔（必须 < session_timeout）
+    max_poll_interval_ms: 300000              # 两次 poll 最大间隔，超时视为消费者死亡
+    max_poll_records: 500                     # 每次 poll 返回的最大消息数
+    fetch_min_bytes: 1                        # 最小拉取数据量，达到才返回响应
+    fetch_max_wait_ms: 500                    # 拉取请求最长等待时间（毫秒）
+    max_partition_fetch_bytes: 1048576        # 单个分区单次拉取最大数据量（字节）
+    check_crcs: true                          # 是否校验消息完整性（CRC）
+    isolation_level: "read_uncommitted"       # 读取事务消息级别（未提交或已提交）
+
+    # 安全配置
+    security_protocol: "PLAINTEXT"            # 安全协议类型
+    sasl:
+      mechanism: "PLAIN"                      # SASL 认证机制
+      username: ""                            # SASL 用户名
+      password: ""                            # SASL 密码
+    ssl:
+      ca_location: ""                         # CA 证书路径
+      certificate_location: ""                # 客户端证书路径
+      key_location: ""                        # 客户端私钥路径
+      key_password: ""                        # 私钥密码
+
+# ==================== JWT配置 ====================
+jwt:
+  secret_key: "game_microservices_jwt_secret_key_2025_very_secure"
+  issuer: "game-microservices-auth"
+  audience: "game-microservices-clients"
+  access_token_expire_seconds: 3600      # 1小时
+  refresh_token_expire_seconds: 604800   # 7天
+  blacklist:
+    enable: true                                # 是否启用 Token 黑名单（用于强制登出/失效）
+    cleanup_interval_hours: 1                   # 黑名单清理任务执行间隔（小时）
+  algorithm: "HS256"
+  enable_jti: true
+  strict_audience_check: true
+  strict_issuer_check: true
+
+# ==================== 密码策略配置 ====================
+password:
+  min_length: 6
+  max_length: 128
+  require_uppercase: false
+  require_lowercase: false
+  require_digits: true
+  require_special_chars: false
+  min_special_chars: 0
+  min_digits: 1
+  min_uppercase: 0
+  min_lowercase: 0
+  forbid_common_passwords: true
+  forbid_personal_info: true
+  bcrypt_cost: 10
+  special_chars: "!@#$%^&*()_+-=[]{}|;:,.<>?"
+
+# ==================== 会话管理配置 ====================
+session:
+  session_timeout: 3600                # 1小时 (3600秒)
+  max_idle_time: 1800                  # 30分钟 (1800秒)
+  max_concurrent_sessions: 10
+  enable_multi_device: true
+  enable_ip_validation: true
+  enable_device_validation: false
+  enable_session_migration: true
+  cleanup_interval: 60                 # 1分钟 (更频繁的清理)
+  enable_session_encryption: true
+  encryption_key: "session_encryption_key_2025_very_secure"
+  enable_anomaly_detection: true
+  max_ip_change_frequency: 0.1          # 每小时最大IP变化频率
+
+# ==================== 用户仓库配置 ====================
+user_repository:
+  enable_cache: true
+  default_cache_ttl: 3600               # 1小时
+  user_cache_ttl: 1800                  # 30分钟
+  game_data_cache_ttl: 600              # 10分钟
+  enable_read_write_split: false
+  max_batch_size: 1000
+  enable_async_operations: true
+  connection_timeout_seconds: 30
+  query_timeout_seconds: 60
+
+# ==================== 性能配置 ====================
+performance:
+  max_concurrent_requests: 1000
+  request_timeout: 30
+  enable_request_logging: true
+  enable_metrics: true
+  thread_pool_size: 16
+  scheduler_thread_pool_size: 4
+
+# ==================== 日志配置 ====================
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: true
+    path: "logs/auth_service.log"
+    max_size: 536870912    # 512 * 1024 * 1024 = 512 MB
+    max_files: 5
+  async:
+    enabled: false
+  level: "INFO"
+
+# ==================== 安全配置 ====================
+security:
+  account_lockout:
+    max_failed_attempts: 5                      # 账户锁定前允许的最大失败登录次数
+    lockout_duration_minutes: 15                # 账户锁定时长（分钟）
+  session:
+    session_timeout_hours: 24                   # 会话超时时间（小时），用于计算清理任务间隔
+  enable_rate_limiting: true
+  rate_limit_requests_per_minute: 100
+  enable_cors: true
+  cors_allowed_origins: [ "*" ]
+  cors_allowed_methods: [ "GET", "POST", "PUT", "DELETE", "OPTIONS" ]
+  cors_allowed_headers: [ "Content-Type", "Authorization" ]
+  enable_request_validation: true
+  max_request_size: "10MB"
+
+# ==================== 监控配置 ====================
+monitoring:
+  enable_health_check: true
+  health_check_interval: 30
+  enable_metrics_collection: true               # 是否启用性能监控指标采集（如 Prometheus 指标）
+  metrics_endpoint: "/metrics"
+  enable_prometheus: false
+  prometheus_port: 9090
+  audit_logging:
+    enable: true
+
+# ==================== 游戏配置 ====================
+game:
+  supported_types:
+    - "snake"
+    - "tetris"
+    - "chess"
+    - "poker"
+    - "rpg"
+    - "moba"
+    - "fps"
+    - "strategy"
+
+  server_selection:
+    algorithm: "least_connections"      # round_robin, least_connections, weighted_round_robin
+    health_check_interval: 60
+    max_players_per_server: 100
+    enable_region_preference: true
+
+  session:
+    game_session_timeout: 7200          # 2小时
+    enable_game_session_migration: true
+    max_game_sessions_per_user: 3
+
+# ==================== 邮件配置 ====================
+email:
+  enable: true
+  smtp_host: "smtp.163.com"
+  smtp_port: 465                    # SSL 端口
+  smtp_user: "13800138000@163.com"
+  smtp_password: "DJ2dFdKegBFTBLdd"    # 网易邮箱授权码
+  from_address: "13800138000@163.com"
+  from_name: "Game Platform"
+  connection_timeout_ms: 10000
+  read_timeout_ms: 10000
+  code_length: 6                     # 验证码位数
+  code_ttl_seconds: 300              # 验证码有效期 5 分钟
+  send_cooldown_seconds: 60          # 发送冷却时间 60 秒
+  max_send_per_day: 10               # 每个邮箱每天最多发送 10 次
+  verify_token_ttl_seconds: 600      # 验证 token 有效期 10 分钟
+
+# ==================== 第三方登录配置 ====================
+oauth:
+  enable_google: false
+  google_client_id: ""
+  google_client_secret: ""
+
+  enable_github: false
+  github_client_id: ""
+  github_client_secret: ""
+
+  enable_wechat: false
+  wechat_app_id: ""
+  wechat_app_secret: ""
+
+  # 游戏平台登录
+  enable_steam: false
+  steam_app_id: ""
+  steam_api_key: ""
+
+  enable_qq: false
+  qq_app_id: ""
+  qq_app_key: ""
+
+# ==================== 开发配置 ====================
+development:
+  enable_debug_mode: false
+  enable_test_endpoints: false
+  mock_external_services: false
+  enable_detailed_error_messages: false
+  enable_request_tracing: false
+
+# ==================== 服务注册中心配置 ====================
+service_registry:
+  enabled: true                       # 是否启用服务注册
+  host: "127.0.0.1"                   # 服务注册中心地址
+  port: 8090                          # 服务注册中心端口
+  heartbeat_interval_s: 30            # 心跳间隔（秒）
+  register_timeout_s: 10              # 注册超时（秒）
+  request_timeout_ms: 5000            # 请求超时（毫秒）
+  auto_heartbeat: true                # 自动发送心跳
+  auto_reconnect: true                # 自动重新注册
+  reconnect_delay_s: 5                # 重连延迟（秒）
+  # 服务元数据
+  metadata:
+    service_type: "core"              # 服务类型：core, game, gateway
+    region: "cn-east"                 # 区域
+
+# ==================== 环境特定配置 ====================
+environment: "development"              # development, testing, staging, production
+
+# 生产环境覆盖配置
+production:
+  logging:
+    level: "WARNING"
+    console: false
+  security:
+    enable_cors: false
+    cors_allowed_origins: ["https://yourgame.com"]
+  development:
+    enable_debug_mode: false
+    enable_test_endpoints: false
+    enable_detailed_error_messages: false
+
+# 测试环境覆盖配置
+testing:
+  database:
+    mysql:
+      database: "game_microservices_test"
+    redis:
+      database: 1
+  jwt:
+    access_token_expire_seconds: 300    # 5分钟（测试用）
+  development:
+    enable_debug_mode: true
+    enable_test_endpoints: true
+    mock_external_services: true

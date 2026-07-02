@@ -1,0 +1,424 @@
+# =============================================================================
+# 游戏微服务 - 多阶段构建版本 Docker Compose
+#
+# 特点:
+# - 每个服务独立镜像
+# - 支持外部 MySQL/Redis
+# - 完整的健康检查
+#
+# 使用方法:
+#   # 使用内部数据库和 Redis
+#   docker-compose -f docker/multi-stage/docker-compose.yml --profile internal-db --profile internal-redis up -d
+#
+#   # 使用外部数据库和 Redis
+#   1. 修改 docker/.env 文件
+#   2. 设置 USE_EXTERNAL_DB=true, MYSQL_HOST=...
+#   3. 设置 USE_EXTERNAL_REDIS=true, REDIS_HOST=...
+#   docker-compose -f docker/multi-stage/docker-compose.yml up -d
+#
+#   # 查看日志
+#   docker-compose -f docker/multi-stage/docker-compose.yml logs -f [服务名]
+#
+#   # 停止服务
+#   docker-compose -f docker/multi-stage/docker-compose.yml down
+# =============================================================================
+
+version: '3.8'
+
+# =============================================================================
+# 全局配置
+# =============================================================================
+x-common-env: &common-env
+  TZ: ${TZ:-Asia/Shanghai}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  # Redis 配置
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_EXTERNAL_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+  # MySQL 配置
+  MYSQL_HOST: ${MYSQL_HOST:-mysql}
+  MYSQL_EXTERNAL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+  MYSQL_USER: ${MYSQL_USER:-root}
+  MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+
+x-healthcheck-config: &healthcheck-config
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+# =============================================================================
+# 稡式配置
+# =============================================================================
+x-service-depends-internal: &service-depends-internal
+  mysql:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  service_registry:
+    condition: service_healthy
+
+x-service-depends-external-db: &service-depends-external-db
+  redis:
+    condition: service_healthy
+  service_registry:
+    condition: service_healthy
+
+x-service-depends-external-redis: &service-depends-external-redis
+  mysql:
+    condition: service_healthy
+  service_registry:
+    condition: service_healthy
+
+x-service-depends-external-all: &service-depends-external-all
+  service_registry:
+    condition: service_healthy
+
+# =============================================================================
+# 网络配置
+# =============================================================================
+networks:
+  game-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# =============================================================================
+# 数据卷配置
+# =============================================================================
+volumes:
+  mysql-data:
+    driver: local
+  redis-data:
+    driver: local
+  logs-data:
+    driver: local
+  nginx-logs:
+    driver: local
+
+# =============================================================================
+# 服务定义
+# =============================================================================
+services:
+  # ===========================================================================
+  # 娡式: 内部数据库
+  # ===========================================================================
+  mysql:
+    image: mysql:8.0
+    container_name: game-mysql
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-game_platform}
+    ports:
+      - "${MYSQL_PORT:-13306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ../shared/init/mysql:/docker-entrypoint-initdb.d:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --max_connections=500
+    networks:
+      game-network:
+        aliases:
+          - mysql
+          - db
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      <<: *healthcheck-config
+    profiles:
+      - internal-db
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    container_name: game-redis
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    volumes:
+      - redis-data:/data
+      - ../shared/config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      game-network:
+        aliases:
+          - redis
+          - cache
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      <<: *healthcheck-config
+    profiles:
+      - internal-redis
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # ===========================================================================
+  # 模式: 外部数据库
+  # ===========================================================================
+  # 注意: 使用外部数据库时， 需要确保以下变量已配置:
+  # - MYSQL_HOST
+  # - MYSQL_EXTERNAL_PORT
+  # - MYSQL_USER
+  # - MYSQL_ROOT_PASSWORD
+  # - REDIS_HOST
+  # - REDIS_EXTERNAL_PORT
+  # - REDIS_PASSWORD
+
+  # ===========================================================================
+
+  # ===========================================================================
+  # 核心服务
+  # ===========================================================================
+  service_registry:
+    build:
+      context: ../..
+      dockerfile: docker/multi-stage/Dockerfile
+      target: service_registry
+    image: service-registry:${VERSION:-latest}
+    container_name: game-service-registry
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVICE_NAME: service_registry
+    ports:
+      - "${SERVICE_REGISTRY_PORT:-8090}:8090"
+    volumes:
+      - logs-data:/app/logs
+    networks:
+      game-network:
+        aliases:
+          - service-registry
+          - registry
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/v1/services/health"]
+      <<: *healthcheck-config
+
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  user_service:
+    build:
+      context: ../..
+      dockerfile: docker/multi-stage/Dockerfile
+      target: user_service
+    image: user-service:${VERSION:-latest}
+    container_name: game-user-service
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVICE_NAME: user_service
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_EXTERNAL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_EXTERNAL_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      SERVICE_REGISTRY_HOST: ${SERVICE_REGISTRY_HOST:-service-registry}
+      SERVICE_REGISTRY_INTERNAL_PORT: ${SERVICE_REGISTRY_INTERNAL_PORT:-8090}
+    ports:
+      - "${USER_SERVICE_PORT:-8082}:8082"
+    volumes:
+      - logs-data:/app/logs
+    networks:
+      game-network:
+        aliases:
+          - user-service
+    depends_on:
+      service_registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/api/v1/user/health"]
+      <<: *healthcheck-config
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  auth_service:
+    build:
+      context: ../..
+      dockerfile: docker/multi-stage/Dockerfile
+      target: auth_service
+    image: auth-service:${VERSION:-latest}
+    container_name: game-auth-service
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVICE_NAME: auth_service
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_EXTERNAL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_EXTERNAL_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      USER_SERVICE_HOST: ${USER_SERVICE_HOST:-user-service}
+      USER_SERVICE_INTERNAL_PORT: ${USER_SERVICE_INTERNAL_PORT:-8082}
+      SERVICE_REGISTRY_HOST: ${SERVICE_REGISTRY_HOST:-service-registry}
+      SERVICE_REGISTRY_INTERNAL_PORT: ${SERVICE_REGISTRY_INTERNAL_PORT:-8090}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-game_microservices_jwt_secret_key_2025_very_secure}
+      SESSION_ENCRYPTION_KEY: ${SESSION_ENCRYPTION_KEY:-session_encryption_key_2025_very_secure}
+    ports:
+      - "${AUTH_SERVICE_PORT:-8083}:8083"
+    volumes:
+      - logs-data:/app/logs
+    networks:
+      game-network:
+        aliases:
+          - auth-service
+    depends_on:
+      service_registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/api/v1/auth/health"]
+      <<: *healthcheck-config
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  game_data_service:
+    build:
+      context: ../..
+      dockerfile: docker/multi-stage/Dockerfile
+      target: game_data_service
+    image: game-data-service:${VERSION:-latest}
+    container_name: game-data-service
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVICE_NAME: game_data_service
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_EXTERNAL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_EXTERNAL_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      AUTH_SERVICE_HOST: ${AUTH_SERVICE_HOST:-auth-service}
+      AUTH_SERVICE_INTERNAL_PORT: ${AUTH_SERVICE_INTERNAL_PORT:-8083}
+      SERVICE_REGISTRY_HOST: ${SERVICE_REGISTRY_HOST:-service-registry}
+      SERVICE_REGISTRY_INTERNAL_PORT: ${SERVICE_REGISTRY_INTERNAL_PORT:-8090}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-game_microservices_jwt_secret_key_2025_very_secure}
+    ports:
+      - "${GAME_DATA_SERVICE_PORT:-8084}:8084"
+    volumes:
+      - logs-data:/app/logs
+    networks:
+      game-network:
+        aliases:
+          - game-data-service
+    depends_on:
+      service_registry:
+        condition: service_healthy
+      auth_service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/api/v1/gamedata/health"]
+      <<: *healthcheck-config
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  gomoku_server:
+    build:
+      context: ../..
+      dockerfile: docker/multi-stage/Dockerfile
+      target: gomoku_server
+    image: gomoku-server:${VERSION:-latest}
+    container_name: game-gomoku-server
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+      SERVICE_NAME: gomoku_server
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_EXTERNAL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_EXTERNAL_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      USER_SERVICE_HOST: ${USER_SERVICE_HOST:-user-service}
+      USER_SERVICE_INTERNAL_PORT: ${USER_SERVICE_INTERNAL_PORT:-8082}
+      GAME_DATA_SERVICE_HOST: ${GAME_DATA_SERVICE_HOST:-game-data-service}
+      GAME_DATA_SERVICE_INTERNAL_PORT: ${GAME_DATA_SERVICE_INTERNAL_PORT:-8084}
+      AUTH_SERVICE_HOST: ${AUTH_SERVICE_HOST:-auth-service}
+      AUTH_SERVICE_INTERNAL_PORT: ${AUTH_SERVICE_INTERNAL_PORT:-8083}
+      SERVICE_REGISTRY_HOST: ${SERVICE_REGISTRY_HOST:-service-registry}
+      SERVICE_REGISTRY_INTERNAL_PORT: ${SERVICE_REGISTRY_INTERNAL_PORT:-8090}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-game_microservices_jwt_secret_key_2025_very_secure}
+    ports:
+      - "${GOMOKU_HTTP_PORT:-8085}:8085"
+      - "${GOMOKU_WS_PORT:-8086}:8086"
+    volumes:
+      - logs-data:/app/logs
+    networks:
+      game-network:
+        aliases:
+          - gomoku-server
+    depends_on:
+      service_registry:
+        condition: service_healthy
+      game_data_service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/api/v1/gomoku/health"]
+      <<: *healthcheck-config
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ===========================================================================
+  # 网关服务
+  # ===========================================================================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: game-nginx
+    restart: unless-stopped
+    environment:
+      <<: *common-env
+    # 🔧 双层 Nginx 架构：暴露端口给宿主机 Nginx
+    # 10080: HTTP 流量 (宿主机 Nginx 代理)
+    # 10443: HTTPS 流量 (可选，用于 SSL 透传场景)
+    ports:
+      - "${NGINX_HTTP_PORT:-10080}:80"
+      - "${NGINX_HTTPS_PORT:-10443}:443"
+    volumes:
+      - ../shared/config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../shared/config/conf.d:/etc/nginx/conf.d:ro
+      - nginx-logs:/var/log/nginx
+    networks:
+      game-network:
+        aliases:
+          - nginx
+          - gateway
+    depends_on:
+      - service_registry
+      - user_service
+      - auth_service
+      - game_data_service
+      - gomoku_server
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      <<: *healthcheck-config
+    deploy:
+      resources:
+        limits:
+          memory: 128M

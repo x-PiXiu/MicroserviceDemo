@@ -1,0 +1,198 @@
+```mermaid
+sequenceDiagram
+    participant User as 👤 游戏客户端
+    participant Gateway as 🌐 API网关<br/>:8081
+    participant Auth as 🔐 认证服务<br/>:8008
+    participant UserSvc as 👤 用户服务<br/>:8082 (❓)
+    participant GameData as 🎮 游戏数据服务<br/>:8083 (❓)  
+    participant Gomoku as 🎯 五子棋服务<br/>:8084
+    participant Redis as ⚡ Redis缓存
+    participant OldDB as 🗄️ 旧数据库<br/>game_microservices
+    participant NewUserDB as 🗄️ 新用户数据库<br/>user_service_db
+    participant NewGameDB as 🗄️ 新游戏数据库<br/>game_service_db
+    participant GomokuDB as 🗄️ 五子棋数据库<br/>gomoku_game_db
+
+    %% =======================================================================
+    %% 阶段1: 用户认证流程 (当前状态未知)
+    %% =======================================================================
+    
+    Note over User, GomokuDB: 🚨 认证流程 - 当前状态混乱，可能使用新旧任一数据库
+    
+    User->>Gateway: 1. 登录请求<br/>POST /api/v1/auth/login<br/>{ username, password }
+    
+    Gateway->>Auth: 2. 转发认证请求
+    
+    alt 如果使用旧架构 (可能的情况)
+        Auth->>OldDB: 3a. 查询用户信息<br/>SELECT * FROM users WHERE username=?
+        OldDB-->>Auth: 4a. 返回用户数据
+    else 如果使用新架构 (期望的情况)  
+        Auth->>UserSvc: 3b. 调用用户服务验证<br/>POST /api/v1/users/validate
+        UserSvc->>NewUserDB: 4b. 查询用户数据库
+        NewUserDB-->>UserSvc: 5b. 返回用户信息
+        UserSvc-->>Auth: 6b. 返回验证结果
+    end
+    
+    Auth->>Redis: 5. 创建会话
+    Auth->>Auth: 6. 生成JWT令牌
+    Auth-->>Gateway: 7. 返回认证结果<br/>{ token, user_info }
+    Gateway-->>User: 8. 返回登录成功
+
+    %% =======================================================================
+    %% 阶段2: 用户信息获取 (展示架构混乱)
+    %% =======================================================================
+    
+    Note over User, GomokuDB: 📊 用户信息获取 - 数据可能分散在多个数据库中
+    
+    User->>Gateway: 9. 获取用户资料<br/>GET /api/v1/users/profile<br/>Authorization: Bearer {token}
+    
+    Gateway->>Auth: 10. 验证JWT令牌
+    Auth->>Redis: 11. 检查令牌缓存
+    Redis-->>Auth: 12. 返回验证结果
+    Auth-->>Gateway: 13. 令牌有效
+    
+    alt 如果用户服务已启动 (理想情况)
+        Gateway->>UserSvc: 14a. 转发到用户服务
+        UserSvc->>NewUserDB: 15a. 查询用户档案
+        NewUserDB-->>UserSvc: 16a. 返回用户数据
+        UserSvc-->>Gateway: 17a. 返回用户资料
+    else 如果用户服务未启动 (当前可能情况)
+        Gateway->>Auth: 14b. 继续使用认证服务
+        Auth->>OldDB: 15b. 查询旧数据库
+        OldDB-->>Auth: 16b. 返回用户数据
+        Auth-->>Gateway: 17b. 返回用户资料
+    end
+    
+    Gateway-->>User: 18. 返回用户资料
+
+    %% =======================================================================  
+    %% 阶段3: 游戏数据获取 (数据冗余问题)
+    %% =======================================================================
+    
+    Note over User, GomokuDB: 🎮 游戏数据获取 - 可能存在数据冗余和不一致
+    
+    User->>Gateway: 19. 获取游戏成就<br/>GET /api/v1/games/achievements
+    
+    alt 如果游戏数据服务已启动 (理想情况)
+        Gateway->>GameData: 20a. 转发到游戏数据服务  
+        GameData->>NewGameDB: 21a. 查询游戏成就
+        NewGameDB-->>GameData: 22a. 返回成就数据
+        GameData-->>Gateway: 23a. 返回成就列表
+    else 如果游戏数据服务未启动 (当前可能情况)
+        Gateway->>Gomoku: 20b. 从五子棋服务获取
+        Gomoku->>GomokuDB: 21b. 查询五子棋数据库
+        Note right of GomokuDB: ⚠️ 这里可能包含重复的用户数据<br/>和不完整的成就数据
+        GomokuDB-->>Gomoku: 22b. 返回部分数据
+        Gomoku-->>Gateway: 23b. 返回有限的成就数据
+    end
+    
+    Gateway-->>User: 24. 返回游戏成就
+
+    %% =======================================================================
+    %% 阶段4: 五子棋游戏流程 (当前可用但有问题)
+    %% =======================================================================
+    
+    Note over User, GomokuDB: 🎯 五子棋游戏 - 当前可运行但使用旧架构
+    
+    User->>Gateway: 25. 加入五子棋房间<br/>WebSocket连接到/ws/gomoku
+    Gateway->>Gomoku: 26. 建立WebSocket连接
+    
+    Gomoku->>Auth: 27. 验证JWT令牌
+    Auth->>Redis: 28. 检查令牌有效性  
+    Redis-->>Auth: 29. 返回验证结果
+    Auth-->>Gomoku: 30. 令牌验证通过
+    
+    %% 用户数据获取 (冗余查询)
+    alt 如果五子棋服务已升级 (理想情况)
+        Gomoku->>UserSvc: 31a. 获取用户信息
+        UserSvc->>NewUserDB: 32a. 查询用户数据
+        NewUserDB-->>UserSvc: 33a. 返回用户信息
+        UserSvc-->>Gomoku: 34a. 返回用户数据
+        
+        Gomoku->>GameData: 35a. 获取游戏档案
+        GameData->>NewGameDB: 36a. 查询游戏档案
+        NewGameDB-->>GameData: 37a. 返回档案数据
+        GameData-->>Gomoku: 38a. 返回游戏档案
+    else 如果五子棋服务使用旧架构 (当前情况)
+        Gomoku->>GomokuDB: 31b. 查询gomoku_users表
+        Note right of GomokuDB: ⚠️ 冗余的用户数据查询<br/>可能与主用户数据不一致
+        GomokuDB-->>Gomoku: 32b. 返回可能过时的用户数据
+    end
+    
+    Gomoku->>GomokuDB: 39. 创建或加入游戏房间
+    GomokuDB-->>Gomoku: 40. 返回房间信息
+    Gomoku-->>User: 41. 连接成功，进入房间
+
+    %% =======================================================================
+    %% 阶段5: 游戏进行中 (实时互动)
+    %% =======================================================================
+    
+    Note over User, GomokuDB: ⚡ 游戏实时互动 - WebSocket通信
+    
+    User->>Gomoku: 42. 下棋移动<br/>WebSocket: { action: "move", x: 5, y: 7 }
+    Gomoku->>GomokuDB: 43. 记录移动
+    Gomoku->>GomokuDB: 44. 检查胜负状态
+    GomokuDB-->>Gomoku: 45. 返回游戏状态
+    
+    alt 游戏结束
+        Gomoku->>GomokuDB: 46a. 更新游戏结果
+        
+        alt 如果游戏数据服务已启动 (理想情况)
+            Gomoku->>GameData: 47a. 更新成就和统计
+            GameData->>NewGameDB: 48a. 更新跨游戏数据
+            NewGameDB-->>GameData: 49a. 更新完成
+            GameData-->>Gomoku: 50a. 确认更新
+            
+            Gomoku->>UserSvc: 51a. 更新用户等级
+            UserSvc->>NewUserDB: 52a. 更新用户数据
+            NewUserDB-->>UserSvc: 53a. 更新完成
+            UserSvc-->>Gomoku: 54a. 确认更新
+        else 如果使用旧架构 (当前情况)
+            Gomoku->>GomokuDB: 47b. 更新gomoku_users表
+            Note right of GomokuDB: ⚠️ 只更新了五子棋数据库中的用户数据<br/>主用户数据库未同步更新
+            GomokuDB-->>Gomoku: 48b. 本地更新完成
+        end
+        
+        Gomoku-->>User: 55. 广播游戏结果
+    else 游戏继续
+        Gomoku-->>User: 46b. 广播移动给所有玩家
+    end
+
+    %% =======================================================================
+    %% 阶段6: 数据同步问题展示
+    %% =======================================================================
+    
+    Note over User, GomokuDB: 🚨 数据一致性问题 - 同一用户数据存在多个版本
+    
+    rect rgba(255, 0, 0, 0.1)
+        Note over OldDB, GomokuDB: ⚠️ 数据一致性问题示例：<br/>用户在五子棋中的经验值已更新，<br/>但主用户数据库中的数据未同步，<br/>导致其他游戏看到的是旧数据
+    end
+
+    %% =======================================================================
+    %% 阶段7: 推荐的修复流程
+    %% =======================================================================
+    
+    Note over User, GomokuDB: ✅ 修复建议 - 启用新架构并迁移数据
+    
+    rect rgba(0, 255, 0, 0.1)
+        Note over UserSvc, GameData: 🎯 推荐修复步骤：<br/>1. 启动用户服务和游戏数据服务<br/>2. 执行数据迁移脚本<br/>3. 更新五子棋服务配置指向新服务<br/>4. 验证数据一致性<br/>5. 逐步淘汰旧数据库
+    end
+
+    %% =======================================================================
+    %% 服务状态说明
+    %% =======================================================================
+    
+    Note over Gateway: 🌐 API网关: ✅ 正常运行
+    Note over Auth: 🔐 认证服务: ❓ 运行中但数据库连接混乱  
+    Note over UserSvc: 👤 用户服务: ❓ 设计完成但可能未启动
+    Note over GameData: 🎮 游戏数据服务: ❓ 设计完成但可能未启动
+    Note over Gomoku: 🎯 五子棋服务: ✅ 运行中但使用旧架构
+    
+    %% =======================================================================
+    %% 数据库状态说明  
+    %% =======================================================================
+    
+    Note over OldDB: 🗄️ 旧数据库: ❌ 包含冗余数据，需要清理
+    Note over NewUserDB: 🗄️ 新用户数据库: ❓ 可能已创建但未使用
+    Note over NewGameDB: 🗄️ 新游戏数据库: ❓ 可能已创建但未使用
+    Note over GomokuDB: 🗄️ 五子棋数据库: ⚠️ 运行中但包含重复用户数据
+```

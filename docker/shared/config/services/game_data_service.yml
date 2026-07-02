@@ -1,0 +1,489 @@
+# =============================================================================
+# 游戏数据服务配置文件 - Docker 容器版本
+# 版本: 1.0.0
+# 说明: 使用环境变量配置，适配 Docker 容器环境
+# =============================================================================
+
+# ==================== 服务基础配置 ====================
+service:
+  name: "game_data_service"
+  version: "1.0.0"
+  description: "游戏数据服务 - 管理跨游戏数据"
+  environment: "${ENVIRONMENT}"
+
+# ==================== 网络配置 ====================
+network:
+  host: "0.0.0.0"
+  port: ${GAME_DATA_SERVICE_INTERNAL_PORT}
+  worker_threads: ${WORKER_THREADS}
+  io_threads: ${IO_THREADS}
+  max_connections: 1000
+  connection_timeout: 30
+  keep_alive_timeout: 30
+  send_buffer_size: 1024
+  recv_buffer_size: 1024
+  read_timeout: 60
+  write_timeout: 60
+  backlog: 1024
+  reuse_address: true
+  tcp_no_delay: true
+  keep_alive: true
+  enable_epoll: true
+
+# ==================== 数据库配置 ====================
+mysql:
+  host: "${MYSQL_HOST}"
+  port: ${MYSQL_EXTERNAL_PORT}
+  username: "${MYSQL_USER}"
+  password: "${MYSQL_ROOT_PASSWORD}"
+  database: "game_service_db"
+  charset: "utf8mb4"
+  collation: "utf8mb4_general_ci"
+
+  pool:
+    initial_size: 5
+    max_size: ${MYSQL_POOL_SIZE}
+    min_size: 2
+    max_idle: 10
+    max_wait_time: 5000
+    max_idle_time_ms: 600000
+    validation_query: "SELECT 1"
+    validation_interval_ms: 30000
+    test_on_borrow: true
+    test_on_return: false
+    test_while_idle: true
+
+  mysql_connect_timeout_ms: 5000
+  mysql_read_timeout_ms: 5000
+  mysql_write_timeout_ms: 5000
+  mysql_auto_reconnect: true
+  mysql_max_reconnect_attempts: 3
+  mysql_reconnect_interval_ms: 1000
+
+  mysql_use_ssl: false
+  mysql_ssl_ca: ""
+  mysql_ssl_cert: ""
+  mysql_ssl_key: ""
+  mysql_ssl_cipher: ""
+  mysql_ssl_verify_server_cert: false
+
+  mysql_max_allowed_packet: 67108864
+  mysql_net_buffer_length: 16384
+  mysql_compress: false
+  mysql_init_command: ""
+
+  mysql_isolation_level: "REPEATABLE-READ"
+  mysql_autocommit: true
+  mysql_lock_wait_timeout: 50000
+
+# ==================== Redis 配置 ====================
+redis:
+  host: "${REDIS_HOST}"
+  port: ${REDIS_EXTERNAL_PORT}
+  password: "${REDIS_PASSWORD}"
+  database: 3
+
+  pool_size: 5
+  max_pool_size: ${REDIS_POOL_SIZE}
+  min_pool_size: 2
+  pool_timeout_ms: 5000
+  pool_max_idle_time_ms: 600000
+  pool_test_on_borrow: true
+  pool_test_on_return: false
+
+  connect_timeout_ms: 2000
+  socket_timeout_ms: 3000
+  command_timeout_ms: 3000
+  tcp_keepalive: false
+  tcp_keepalive_idle: 60
+  tcp_keepalive_interval: 30
+  tcp_keepalive_count: 3
+
+  auto_reconnect: true
+  max_reconnect_attempts: 3
+  reconnect_interval_ms: 1000
+  retry_attempts: 2
+  retry_delay_ms: 500
+
+  cluster_enabled: false
+  cluster_max_redirections: 5
+  cluster_require_full_coverage: true
+
+  sentinel_enabled: false
+  sentinel_master_name: "mymaster"
+  sentinel_password: ""
+  sentinel_timeout_ms: 5000
+
+  use_ssl: false
+  ssl_cert_file: ""
+  ssl_key_file: ""
+  ssl_ca_file: ""
+  ssl_verify_peer: false
+  ssl_ciphers: ""
+
+  pipeline_size: 10
+  enable_pipeline: false
+  max_memory_policy: 0
+  compress_data: false
+
+  cache:
+    default_ttl: 300
+    user_info_ttl: 300
+    user_profile_ttl: 600
+    user_preferences_ttl: 1800
+
+# ==================== 线程池配置 ====================
+thread_pool:
+  core_size: 4
+  max_size: 16
+  keep_alive_ms: 60000
+  queue_capacity: 1024
+  allow_core_timeout: false
+  rejection_policy: "abort"
+  prestart_core_threads: false
+  thread_priority: 5
+  name_prefix: "game-data-service-"
+  enable_monitoring: false
+  monitoring_interval_ms: 5000
+
+# ==================== 安全配置 ====================
+security:
+  authentication:
+    enabled: true
+    token_verification_url: "http://${AUTH_SERVICE_HOST}:${AUTH_SERVICE_INTERNAL_PORT}/api/v1/auth/validate"
+    cache_tokens: true
+    token_cache_ttl: 300
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 2000
+    requests_per_hour: 20000
+    burst_size: 200
+  cors:
+    enabled: ${ENABLE_CORS}
+    allowed_origins: [ "${CORS_ALLOWED_ORIGINS}" ]
+    allowed_methods: [ "GET", "POST", "PUT", "DELETE", "OPTIONS" ]
+    allowed_headers: [ "Content-Type", "Authorization", "X-Requested-With" ]
+    max_age: 3600
+
+# ==================== 游戏数据配置 ====================
+game_data:
+  games:
+    id: 1
+    name: "gomoku"
+    display_name: "五子棋"
+    initial_rating: 1200
+    max_rating: 3000
+    min_rating: 100
+  rating:
+    elo_k_factor: 32
+    rating_floor: 100
+    provisional_games: 10
+  experience:
+    base_exp_per_game: 10
+    win_bonus_multiplier: 2.0
+    loss_penalty: 0.5
+    draw_multiplier: 1.0
+    max_level: 100
+    exp_formula: "quadratic"
+  currency:
+    default_gold: 1000
+    default_gems: 10
+    max_gold: 999999999
+    max_gems: 99999
+  inventory:
+    max_items_per_type: 999
+    auto_cleanup_expired: true
+    cleanup_interval_hours: 24
+
+# ==================== 功能开关配置 ====================
+features:
+  achievements:
+    enable: true
+  ranking:
+    enable: true
+  inventory:
+    enable: true
+  currency:
+    enable: true
+
+# ==================== 定时器配置 ====================
+timers:
+  cache_cleanup_interval_minutes: 30
+  data_archival_interval_hours: 24
+  achievement_update_interval_minutes: 15
+  ranking_update_interval_minutes: 10
+  inventory_cleanup_interval_hours: 6
+  currency_audit_interval_hours: 12
+  status_log_interval_minutes: 5
+
+# ==================== 性能配置 ====================
+performance:
+  max_concurrent_players: 1000
+
+# ==================== 缓存配置 ====================
+cache:
+  enable_cleanup: true
+  expire_seconds: 3600
+
+# ==================== 数据管理配置 ====================
+data_management:
+  enable_archival: true
+
+# ==================== 业务规则配置 ====================
+business_rules:
+  max_achievements_per_player: 500
+  max_inventory_items: 200
+  currency_transfer_daily_limit: 10000.0
+  ranking_top_players_count: 100
+
+# ==================== 成就系统配置 ====================
+achievements:
+  enabled: true
+  auto_unlock: true
+  notification_enabled: true
+  categories:
+    - "gameplay"
+    - "progression"
+    - "social"
+    - "special"
+  rarity_multipliers:
+    common: 1.0
+    rare: 1.5
+    epic: 2.0
+    legendary: 3.0
+  unlock_rewards:
+    common: 10
+    rare: 25
+    epic: 50
+    legendary: 100
+
+# ==================== 排行榜配置 ====================
+leaderboards:
+  enabled: true
+  types:
+    - "rating"
+    - "wins"
+    - "playtime"
+    - "win_streak"
+  update_frequency: 300
+  max_entries: 1000
+  cache_duration: 600
+  seasons:
+    enabled: true
+    current_season: "season_2025_1"
+    season_duration_days: 90
+
+# ==================== 排行榜调度器配置 ====================
+leaderboard_scheduler:
+  enabled: true
+  interval_seconds: 3600
+  weekly:
+    enabled: true
+    reset_day: 1
+    reset_hour: 0
+    reset_minute: 0
+    timezone: "Asia/Shanghai"
+    archive_before_reset: true
+  monthly:
+    enabled: true
+    reset_day: 1
+    reset_hour: 0
+    reset_minute: 0
+    timezone: "Asia/Shanghai"
+    archive_before_reset: true
+  seasonal:
+    enabled: true
+    duration_days: 90
+    notify_before_days: 7
+
+# ==================== 游戏插件配置 ====================
+game_plugins:
+  enabled: true
+  auto_load: true
+  plugin_directory: "/app/plugins"
+  games:
+    gomoku:
+      enabled: true
+      id: "gomoku"
+      name: "五子棋"
+      class: "GomokuPlugin"
+      version: "1.0.0"
+      category: "BOARD"
+      player_range: [2, 2]
+      rating_config:
+        initial_rating: 1200
+        min_rating: 100
+        max_rating: 3000
+        k_factor_new: 32
+        k_factor_stable: 16
+        provisional_games: 10
+    chess:
+      enabled: false
+      id: "chess"
+      name: "中国象棋"
+      class: "ChessPlugin"
+      category: "BOARD"
+      player_range: [2, 2]
+    go:
+      enabled: false
+      id: "go"
+      name: "围棋"
+      class: "GoPlugin"
+      category: "BOARD"
+      player_range: [2, 2]
+
+# ==================== 游戏回放配置 ====================
+replay:
+  enabled: true
+  storage_path: "/app/data/replays"
+  max_replays_per_user: 100
+  max_replay_age_days: 30
+  max_replay_size_bytes: 10485760
+  compress_replays: true
+  compression_level: 6
+  recording:
+    auto_record: true
+    record_chat: false
+    record_spectators: false
+  playback:
+    default_speed: 1.0
+    available_speeds: [0.5, 1.0, 1.5, 2.0]
+    step_by_step: true
+
+# ==================== 日志配置 ====================
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: true
+    path: "/app/logs/game_data_service.log"
+    max_size: 536870912
+    max_files: 5
+  async:
+    enabled: false
+  level: "${LOG_LEVEL}"
+
+# ==================== 服务注册中心配置 ====================
+service_registry:
+  enabled: true
+  host: "${SERVICE_REGISTRY_HOST}"
+  port: ${SERVICE_REGISTRY_INTERNAL_PORT}
+  heartbeat_interval_s: 30
+  register_timeout_s: 10
+  request_timeout_ms: 5000
+  auto_heartbeat: true
+  auto_reconnect: true
+  reconnect_delay_s: 5
+  metadata:
+    service_type: "core"
+    region: "cn-east"
+
+# ==================== 监控配置 ====================
+monitoring:
+  enabled: true
+  metrics:
+    enabled: true
+    port: 9083
+    path: "/metrics"
+  health_check:
+    enabled: true
+    path: "/api/v1/gamedata/health"
+    interval: 30
+    timeout: 5
+  performance:
+    track_requests: true
+    track_database_queries: true
+    track_cache_operations: true
+    slow_query_threshold: 1000
+
+# ==================== 业务配置 ====================
+business:
+  game_results:
+    auto_process_rewards: true
+    auto_update_achievements: true
+    auto_update_leaderboards: true
+    batch_processing: true
+    batch_size: 100
+  currency_operations:
+    enable_transaction_log: true
+    max_single_transaction: 1000000
+    daily_earn_limit: 100000
+    fraud_detection: true
+  inventory_management:
+    auto_stack_items: true
+    auto_remove_expired: true
+    max_unique_items: 1000
+  social_features:
+    friend_requests: true
+    leaderboard_sharing: true
+    achievement_sharing: true
+
+# ==================== JWT 认证配置 ====================
+jwt:
+  secret_key: "${JWT_SECRET_KEY}"
+  issuer: "game-microservices-auth"
+  audience: "game-microservices-clients"
+  algorithm: "HS256"
+  clock_skew_seconds: 60
+  validate_issuer: true
+  validate_audience: false
+  validate_expiration: true
+
+# ==================== 认证中间件配置 ====================
+auth_middleware:
+  enabled: true
+  token_header: "Authorization"
+  token_prefix: "Bearer "
+  exclude_paths:
+    - "/health"
+    - "/info"
+    - "/stats"
+    - "/api/v1/gamedata/health"
+
+# ==================== 环境配置 ====================
+development:
+  debug_mode: true
+  mock_external_services: false
+  enable_cors: true
+  log_all_requests: true
+  database:
+    show_sql: true
+    log_slow_queries: true
+  cache:
+    disable_for_testing: false
+  achievements:
+    instant_unlock: false
+
+testing:
+  debug_mode: false
+  database:
+    use_test_db: true
+    reset_data_on_start: true
+  cache:
+    use_memory_cache: true
+  external_services:
+    mock_auth_service: true
+    mock_user_service: true
+  achievements:
+    fast_unlock: true
+
+production:
+  debug_mode: false
+  security:
+    enforce_https: true
+    strict_cors: true
+    enable_audit_log: true
+  database:
+    use_read_replicas: true
+    enable_connection_pooling: true
+    enable_partitioning: true
+  cache:
+    enable_clustering: true
+    backup_enabled: true
+  monitoring:
+    alert_on_errors: true
+    alert_on_high_latency: true
+    performance_tracking: true
+  leaderboards:
+    real_time_updates: true
+    distributed_calculation: true

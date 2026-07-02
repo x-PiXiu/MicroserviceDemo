@@ -1,0 +1,536 @@
+# =============================================================================
+# 五子棋游戏服务配置文件 - ConfigManager版本
+# 版本: 2.0.0
+# 日期: 2025-09-28
+# 说明: 基于common::config::ConfigManager的统一配置结构
+# =============================================================================
+
+# ==================== 服务基础配置 ====================
+service:
+  name: "gomoku_service"
+  version: "2.0.0"
+  description: "五子棋游戏服务 - 基于微服务架构"
+  environment: "development"
+
+  # 架构复杂度模式 (simple|standard|enterprise)
+  mode: "simple"  # 默认使用简化模式
+
+# ==================== 外部服务配置 (P0修复) ====================
+services:
+  user_service:
+    url: "http://localhost:8082"           # 用户服务地址 (通过Nginx代理)
+    timeout_seconds: 5
+    cache_ttl_seconds: 300
+    max_retries: 3
+    retry_delay_ms: 500
+
+  game_data_service:
+    url: "http://localhost:8084"           # 游戏数据服务地址 (通过Nginx代理)
+    timeout_seconds: 5
+    cache_ttl_seconds: 180
+    max_retries: 3
+    retry_delay_ms: 500
+
+  auth_service:
+    url: "http://localhost:8083"           # 认证服务地址 (通过Nginx代理)
+    timeout_seconds: 5
+    cache_ttl_seconds: 300
+  
+# ==================== 架构模式配置 ====================
+architecture:
+  simple_mode:
+    # 🧵 线程配置 - 最小化
+    threads:
+      worker_threads: 4          # 统一线程池
+      io_threads: 2              # 网络IO线程
+      event_threads: 1           # 事件处理线程(合并到线程池)
+    
+    # 📨 组件开关 - 仅核心功能
+    components:
+      enable_kafka: false        # 禁用Kafka
+      enable_redis: false        # 禁用Redis缓存
+      enable_monitoring: false   # 禁用监控
+      enable_circuit_breaker: false  # 禁用熔断器
+      enable_time_wheel: false   # 禁用时间轮
+      
+    # 💾 存储配置 - 最小连接
+    storage:
+      mysql_pool_size: 3         # 最小MySQL连接池
+      redis_pool_size: 0         # 禁用Redis
+      
+  standard_mode:
+    # 🧵 标准线程配置
+    threads:
+      worker_threads: 8
+      io_threads: 4
+      event_threads: 2
+    
+    # 📨 标准组件
+    components:
+      enable_kafka: true         # 启用Kafka
+      enable_redis: true         # 启用Redis
+      enable_monitoring: true    # 基础监控
+      enable_circuit_breaker: true
+      enable_time_wheel: true
+      
+    # 💾 标准存储
+    storage:
+      mysql_pool_size: 8
+      redis_pool_size: 4
+      
+  enterprise_mode:
+    # 🧵 企业级线程配置
+    threads:
+      worker_threads: 16
+      io_threads: 8
+      event_threads: 4
+    
+    # 📨 全功能组件
+    components:
+      enable_kafka: true
+      enable_redis: true
+      enable_monitoring: true    # 完整监控
+      enable_circuit_breaker: true
+      enable_time_wheel: true
+      enable_distributed_cache: true
+      
+    # 💾 企业级存储
+    storage:
+      mysql_pool_size: 20
+      redis_pool_size: 8
+
+# ==================== 网络配置 ====================
+network:
+  host: "0.0.0.0"
+  port: 8085
+  worker_threads: 4
+  io_threads: 2
+  max_connections: 1000
+  connection_timeout: 30
+  keep_alive_timeout: 30
+  send_buffer_size: 1024
+  recv_buffer_size: 1024
+  read_timeout: 60
+  write_timeout: 60
+  backlog: 1024
+  reuse_address: true
+  tcp_no_delay: true
+  keep_alive: true
+  enable_epoll: true
+
+# ==================== 数据库配置 ====================
+mysql:
+  # --- 基础连接信息 ---
+  host: "127.0.0.1"                   # MySQL 服务器主机名或IP地址
+  port: 3306                          # MySQL 服务端口
+  username: "root"                    # 登录用户名
+  password: "013ee244b29700ed"                  # 登录密码
+  database: "gomoku_game_db"          # 五子棋游戏数据库
+  charset: "utf8mb4"                  # 客户端字符集
+  collation: "utf8mb4_general_ci"     # 字符校对规则
+
+  # --- 连接池配置 ---
+  pool:
+    initial_size: 5                   # 启动时初始化的连接数
+    max_size: 20                      # 连接池最大连接数
+    min_size: 2                       # 连接池保持的最小空闲连接数
+    max_idle: 10                      # 最大空闲连接数
+    max_wait_time: 5000               # 获取连接的最大等待时间（毫秒）
+    max_idle_time_ms: 600000          # 连接最大空闲时间（毫秒）
+    validation_query: "SELECT 1"      # 用于验证连接是否有效的SQL语句
+    validation_interval_ms: 30000     # 空闲连接检测间隔（毫秒）
+    test_on_borrow: true              # 借出连接前是否验证有效性
+    test_on_return: false             # 归还连接时是否验证有效性
+    test_while_idle: true             # 空闲时是否定期验证连接有效性
+
+  # --- 连接与重连参数 ---
+  mysql_connect_timeout_ms: 5000      # 连接超时时间（毫秒）
+  mysql_read_timeout_ms: 5000         # 读取数据超时时间（毫秒）
+  mysql_write_timeout_ms: 5000        # 写入数据超时时间（毫秒）
+  mysql_auto_reconnect: true          # 是否自动重连
+  mysql_max_reconnect_attempts: 3     # 最大重连尝试次数
+  mysql_reconnect_interval_ms: 1000   # 重连间隔时间（毫秒）
+
+  # --- SSL 安全连接配置 ---
+  mysql_use_ssl: false                # 是否启用 SSL 加密连接
+  mysql_ssl_ca: ""                    # CA 证书路径
+  mysql_ssl_cert: ""                  # 客户端证书路径
+  mysql_ssl_key: ""                   # 客户端私钥路径
+  mysql_ssl_cipher: ""                # 指定加密套件
+  mysql_ssl_verify_server_cert: false # 是否验证服务端证书域名
+
+  # --- 性能调优参数 ---
+  mysql_max_allowed_packet: 67108864  # 最大允许的包大小（字节），默认 64MB
+  mysql_net_buffer_length: 16384      # 网络缓冲区初始大小（字节）
+  mysql_compress: false               # 是否启用网络传输压缩
+  mysql_init_command: ""              # 连接建立后执行的初始化SQL
+
+  # --- 事务与隔离级别配置 ---
+  mysql_isolation_level: "REPEATABLE-READ"  # 事务隔离级别
+  mysql_autocommit: true              # 是否自动提交事务
+  mysql_lock_wait_timeout: 50000      # 行锁等待超时时间（毫秒）
+
+# ==================== Redis 配置 ====================
+redis:
+  # --- 基础连接信息 ---
+  host: "127.0.0.1"                       # Redis 服务器主机名或IP地址
+  port: 6379                          # Redis 服务端口
+  password: "123456"                  # 认证密码
+  database: 1                         # 使用的数据库编号（五子棋专用）
+
+  # --- 连接池配置 ---
+  pool_size: 5                        # 初始连接池大小
+  max_pool_size: 20                   # 最大连接数
+  min_pool_size: 2                    # 最小空闲连接数
+  pool_timeout_ms: 5000               # 获取连接最大等待时间（毫秒）
+  pool_max_idle_time_ms: 600000       # 连接最大空闲时间（毫秒）
+  pool_test_on_borrow: true           # 借出前是否测试连接有效性
+  pool_test_on_return: false          # 归还时是否测试连接有效性
+
+  # --- 连接超时与网络参数 ---
+  connect_timeout_ms: 2000            # 建立连接超时时间（毫秒）
+  socket_timeout_ms: 3000             # Socket 读写超时（毫秒）
+  command_timeout_ms: 3000            # 单条命令执行超时（毫秒）
+  tcp_keepalive: false                # 是否启用 TCP KeepAlive
+  tcp_keepalive_idle: 60              # KeepAlive 空闲时间（秒）
+  tcp_keepalive_interval: 30          # KeepAlive 探测间隔（秒）
+  tcp_keepalive_count: 3              # KeepAlive 探测失败次数上限
+
+  # --- 重连与重试机制 ---
+  auto_reconnect: true                # 连接断开后是否自动重连
+  max_reconnect_attempts: 3           # 最大重连尝试次数
+  reconnect_interval_ms: 1000         # 重连间隔（毫秒）
+  retry_attempts: 2                   # 命令失败后重试次数
+  retry_delay_ms: 500                 # 命令重试间隔（毫秒）
+
+  # --- 集群模式配置 ---
+  cluster_enabled: false              # 是否启用 Redis Cluster 模式
+  cluster_max_redirections: 5         # 最大重定向次数
+  cluster_require_full_coverage: true # 是否要求所有哈希槽都可用
+
+  # --- 哨兵模式配置 ---
+  sentinel_enabled: false             # 是否启用 Redis Sentinel 高可用模式
+  sentinel_master_name: "mymaster"    # Sentinel 监控的主节点名称
+  sentinel_password: ""               # Sentinel 认证密码
+  sentinel_timeout_ms: 5000           # Sentinel 连接超时（毫秒）
+
+  # --- SSL/TLS 安全连接 ---
+  use_ssl: false                      # 是否启用 SSL/TLS 加密连接
+  ssl_cert_file: ""                   # 客户端证书文件路径
+  ssl_key_file: ""                    # 客户端私钥文件路径
+  ssl_ca_file: ""                     # CA 证书路径
+  ssl_verify_peer: false              # 是否验证服务端证书有效性
+  ssl_ciphers: ""                     # 指定加密套件
+
+  # --- 性能优化配置 ---
+  pipeline_size: 10                   # 管道批量操作的默认大小
+  enable_pipeline: false              # 是否默认启用管道
+  max_memory_policy: 0                # 内存淘汰策略
+  compress_data: false                # 是否压缩存储的数据
+
+# ==================== 线程池配置 ====================
+thread_pool:
+  # --- 核心参数 ---
+  core_size: 6                        # 核心线程数
+  max_size: 16                        # 最大线程数
+  keep_alive_ms: 60000                # 非核心线程空闲存活时间（毫秒）
+  queue_capacity: 1024                # 任务队列容量
+
+  # --- 行为策略 ---
+  allow_core_timeout: false           # 是否允许核心线程超时退出
+  rejection_policy: "abort"           # 任务拒绝策略
+  prestart_core_threads: false        # 是否在启动时预创建所有核心线程
+
+  # --- 线程属性 ---
+  thread_priority: 5                  # 线程优先级
+  name_prefix: "gomoku-service-"       # 线程名称前缀
+
+  # --- 监控配置 ---
+  enable_monitoring: true             # 是否启用线程池运行时监控
+  monitoring_interval_ms: 5000        # 监控日志/指标采集间隔（毫秒）
+
+# ==================== WebSocket配置 ====================
+websocket:
+  enabled: true
+  port: 8086
+  max_connections: 500
+  ping_interval: 30
+  pong_timeout: 10
+  compression: true
+  per_message_deflate: true
+
+# ==================== 安全配置 ====================
+security:
+  authentication:
+    enabled: true
+    token_verification_url: "http://127.0.0.1:8083/api/v1/auth/validate"
+    cache_tokens: true
+    token_cache_ttl: 300
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 1000
+    requests_per_hour: 10000
+    burst_size: 100
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization", "X-Requested-With"]
+    max_age: 3600
+
+# ==================== 五子棋游戏配置 ====================
+gomoku:
+  # --- 基础游戏配置 ---
+  max_concurrent_games: 100           # 最大并发游戏数
+  allow_spectators: true              # 是否允许观战
+  enable_ranking: true                # 是否启用排名系统
+  enable_replay: false                # 是否启用录像回放
+  game_data_path: "data/gomoku"       # 游戏数据存储路径
+
+  # --- 默认游戏设置 ---
+  default_game_mode: 0                # 默认游戏模式：0=自由模式, 1=连珠模式, 2=Swap2
+  time_limit: 900                     # 默认时间限制（秒）
+  increment_per_move: 10              # 每步增加时间（秒）
+  allow_undo: false                   # 是否允许悔棋
+  max_spectators: 50                  # 最大观战人数
+  ranking_enabled: true               # 是否启用排名
+
+  # --- 游戏开始配置 (P0修复) ---
+  require_ready_to_start: false       # 是否要求所有玩家准备才能开始
+  auto_start_when_full: false         # 人满时是否自动开始
+  auto_start_delay_ms: 3000           # 自动开始延迟(毫秒)
+
+  # --- 数据持久化配置 ---
+  enable_database: true               # 是否启用数据库持久化
+  save_game_records: true             # 是否保存游戏记录
+  save_move_history: true             # 是否保存移动历史
+  save_chat_messages: true            # 是否保存聊天消息
+  enable_statistics: true             # 是否启用统计功能
+
+  # --- 房间管理配置 ---
+  max_rooms: 1000                     # 最大房间数
+  room_idle_timeout: 1800             # 房间空闲超时（秒）
+  auto_destroy_empty_rooms: true      # 是否自动销毁空房间
+  room_cleanup_interval: 300          # 房间清理间隔（秒）
+
+# ==================== 缓存配置 ====================
+cache:
+  enable: true                        # 是否启用缓存
+  leaderboard: true                   # 是否缓存排行榜
+  user_stats: true                    # 是否缓存用户统计
+  room_states: true                   # 是否缓存房间状态
+  expire_seconds: 3600                # 缓存过期时间（秒）
+  
+  # 具体缓存TTL配置
+  ttl:
+    leaderboard: 300                  # 排行榜缓存（秒）
+    user_profile: 600                 # 用户档案缓存（秒）
+    room_info: 60                     # 房间信息缓存（秒）
+    game_statistics: 300              # 游戏统计缓存（秒）
+
+# ==================== 日志配置 ====================
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: true
+    path: "logs/gomoku_server.log"
+    max_size: 536870912    # 512 * 1024 * 1024 = 512 MB
+    max_files: 5
+  async:
+    enabled: false
+  level: "INFO"
+
+# ==================== 服务注册中心配置 ====================
+service_registry:
+  enabled: true                       # 是否启用服务注册
+  host: "127.0.0.1"                   # 服务注册中心地址
+  port: 8090                          # 服务注册中心端口
+  heartbeat_interval_s: 30            # 心跳间隔（秒）
+  register_timeout_s: 10              # 注册超时（秒）
+  request_timeout_ms: 5000            # 请求超时（毫秒）
+  auto_heartbeat: true                # 自动发送心跳
+  auto_reconnect: true                # 自动重新注册
+  reconnect_delay_s: 5                # 重连延迟（秒）
+  # 服务元数据（注意：service_type 和 game_type 在代码中设置）
+  metadata:
+    region: "cn-east"                 # 区域
+
+# ==================== 监控配置 ====================
+monitoring:
+  enabled: true
+  metrics:
+    enabled: true
+    port: 9084
+    path: "/metrics"
+  health_check:
+    enabled: true
+    path: "/api/v1/gomoku/health"
+    interval: 30
+    timeout: 5
+  performance:
+    track_requests: true
+    track_database_queries: true
+    track_cache_operations: true
+    track_game_operations: true
+    slow_query_threshold: 1000
+    slow_game_operation_threshold: 5000
+
+# ==================== 业务配置 ====================
+business:
+  game_matching:
+    enabled: true                     # 是否启用自动匹配
+    skill_based_matching: true        # 是否基于技能等级匹配
+    max_rating_difference: 200        # 最大评分差异
+    match_timeout: 60                 # 匹配超时（秒）
+
+# ==================== 匹配池详细配置 ====================
+# 注意：MatchPoolConfig::fromConfig() 需要以下配置键
+match:
+  # --- 基础配置 ---
+  max_pool_size: 1000                 # 最大池容量
+  max_wait_seconds: 300               # 最大等待时间（秒），5分钟
+  match_interval_ms: 100              # 匹配间隔（毫秒）
+
+  # --- 评分配置 ---
+  initial_rating_range: 100           # 初始评分范围
+  rating_expansion_per_interval: 25   # 每次扩展的评分量
+  max_rating_expansion: 500           # 最大评分扩展
+
+  # --- 优先级配置 ---
+  priority_wait_threshold_seconds: 30 # 等待超过此时间获得高优先级
+  high_priority_expansion_bonus: 50   # 高优先级额外扩展量
+
+  # --- 质量配置 ---
+  excellent_quality_threshold: 50     # 优秀质量阈值（评分差 < 50）
+  good_quality_threshold: 100         # 良好质量阈值（评分差 < 100）
+  fair_quality_threshold: 200         # 一般质量阈值（评分差 < 200）
+
+  # --- 权重配置 ---
+  rating_weight: 0.6                  # 评分匹配权重
+  wait_time_weight: 0.3               # 等待时间权重
+  tier_weight: 0.1                    # 段位权重
+  
+  leaderboard:
+    enabled: true                     # 是否启用排行榜
+    update_interval: 300              # 排行榜更新间隔（秒）
+    max_entries: 1000                 # 排行榜最大条目数
+    seasonal_reset: false             # 是否季节性重置
+  
+  replay_system:
+    enabled: false                    # 是否启用录像系统
+    storage_path: "/var/lib/game-microservices/replays"
+    max_replay_size: "50MB"           # 单个录像最大大小
+    retention_days: 30                # 录像保留天数
+  
+  anti_cheat:
+    enabled: true                     # 是否启用反作弊
+    move_time_analysis: true          # 是否分析落子时间
+    pattern_detection: true           # 是否启用模式检测
+    suspicious_move_threshold: 5      # 可疑移动阈值
+
+# ==================== JWT 认证配置 ====================
+# 注意：此配置必须与 auth_service 中的 JWT 配置保持一致
+jwt:
+  # 注意：此 secret_key 必须与 auth_service_config.yml 中的 jwt.secret_key 完全一致
+  secret_key: "${JWT_SECRET_KEY:game_microservices_jwt_secret_key_2025_very_secure}"
+  issuer: "game-microservices-auth"           # 令牌发行者（必须与 auth_service 一致）
+  audience: "game-microservices-clients"      # 令牌受众
+  algorithm: "HS256"                          # 签名算法
+  clock_skew_seconds: 60                      # 时钟偏差容忍（秒）
+  validate_issuer: true                       # 是否验证发行者
+  validate_audience: false                    # 是否验证受众
+  validate_expiration: true                   # 是否验证过期时间
+
+# ==================== 认证中间件配置 ====================
+auth_middleware:
+  enabled: true                               # 是否启用认证中间件
+  token_header: "Authorization"               # Token 头部名称
+  token_prefix: "Bearer "                     # Token 前缀
+  # 不需要认证的路径（前缀匹配）
+  exclude_paths:
+    - "/health"
+    - "/info"
+    - "/stats"
+    - "/api/v1/gomoku/health"
+
+# ==================== 环境配置 ====================
+development:
+  debug_mode: true
+  mock_external_services: false
+  enable_cors: true
+  log_all_requests: true
+  database:
+    show_sql: true
+    log_slow_queries: true
+  cache:
+    disable_for_testing: false
+  game:
+    allow_debug_commands: true
+    fast_game_mode: false
+
+testing:
+  debug_mode: false
+  database:
+    use_test_db: true
+    reset_data_on_start: true
+  cache:
+    use_memory_cache: true
+  external_services:
+    mock_user_service: true
+    mock_game_data_service: true
+  game:
+    accelerated_time: true
+    skip_animations: true
+
+production:
+  debug_mode: false
+  security:
+    enforce_https: true
+    strict_cors: true
+    enable_audit_log: true
+  database:
+    use_read_replicas: true
+    enable_connection_pooling: true
+  cache:
+    enable_clustering: true
+    backup_enabled: true
+  monitoring:
+    alert_on_errors: true
+    alert_on_high_latency: true
+    performance_tracking: true
+  game:
+    strict_validation: true
+    enhanced_anti_cheat: true
+
+# ==================== Kafka事件总线配置 ====================
+kafka:
+  enabled: true                         # 是否启用Kafka事件总线
+  brokers: "172.26.26.199:9092"             # Kafka broker地址
+  topic_prefix: "gomoku_events_"        # 主题前缀
+  consumer_group: "gomoku_service"      # 消费者组
+  client_id: "gomoku_client"            # 客户端ID
+  partition_count: 3                    # 分区数量
+  timeout_ms: 5000                      # 超时时间
+  enable_auto_commit: true              # 自动提交偏移量
+  batch_size: 100                       # 批量大小
+  
+  # 事件路由配置
+  cross_service_events:                 # 需要跨服务传播的事件类型
+    - "user.status.changed"
+    - "user.rating.updated"
+    - "game.ended"
+    - "service.health.changed"
+    - "circuit_breaker.state.changed"
+  
+  local_only_events:                    # 仅本地处理的事件类型
+    - "game.move.made"
+    - "game.room.created"
+    - "game.room.destroyed"
+  
+  # 主题映射配置
+  topic_routing:
+    user_events: "user"                 # 用户相关事件主题
+    game_events: "game"                 # 游戏相关事件主题
+    system_events: "system"             # 系统相关事件主题
+    default: "default"                  # 默认主题

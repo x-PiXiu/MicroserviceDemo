@@ -1,0 +1,1560 @@
+# HTTP服务器框架业务流程图
+
+## 1. HTTP服务器整体架构图
+
+```mermaid
+graph TB
+    %% 客户端层
+    subgraph Clients["客户端层"]
+        direction TB
+        WebBrowser[Web浏览器]
+        MobileApp[移动应用]
+        ApiClient[API客户端]
+        Microservice[其他微服务]
+    end
+    
+    %% HTTP服务器核心
+    subgraph HttpServerCore["HTTP服务器核心 (HttpServer)"]
+        direction TB
+        subgraph NetworkLayer["网络层"]
+            EventLoop[事件循环<br/>EventLoop]
+            ListenSocket[监听套接字<br/>Socket]
+            ListenChannel[监听通道<br/>Channel]
+            EpollManager[Epoll管理器]
+        end
+        
+        subgraph SessionLayer["会话管理层"]
+            SessionManager[会话管理器]
+            HttpSession1[HTTP会话1<br/>HttpSession]
+            HttpSession2[HTTP会话2<br/>HttpSession]
+            HttpSessionN[HTTP会话N<br/>HttpSession]
+            KeepAliveManager[Keep-Alive管理]
+        end
+        
+        subgraph ProcessingLayer["请求处理层"]
+            HttpRouter[路由器<br/>HttpRouter]
+            MiddlewareManager[中间件管理器<br/>MiddlewareManager]
+            RequestParser[请求解析器<br/>HttpRequest]
+            ResponseBuilder[响应构建器<br/>HttpResponse]
+        end
+        
+        subgraph HandlerLayer["处理器层"]
+            RouteHandlers[路由处理器]
+            StaticFileHandler[静态文件处理器]
+            ErrorHandler[错误处理器]
+            ApiDiscoveryHandler[API发现处理器]
+        end
+        
+        subgraph MiddlewareLayer["中间件层"]
+            CorsMiddleware[CORS中间件]
+            AuthMiddleware[认证中间件]
+            LoggingMiddleware[日志中间件]
+            RateLimitMiddleware[限流中间件]
+            CustomMiddleware[自定义中间件]
+        end
+    end
+    
+    %% 支撑系统
+    subgraph SupportSystems["支撑系统"]
+        direction TB
+        ThreadPool[线程池<br/>ThreadPool]
+        TimingWheel[时间轮<br/>HierarchicalTimingWheel]
+        Logger[日志系统<br/>Logger]
+        ConfigManager[配置管理<br/>ConfigManager]
+        PerformanceMonitor[性能监控器]
+    end
+    
+    %% 存储层
+    subgraph StorageLayer["存储层"]
+        direction TB
+        FileSystem[文件系统<br/>静态文件]
+        RouteCache[路由缓存<br/>内存]
+        SessionCache[会话缓存<br/>内存]
+        StatsStorage[统计数据存储<br/>内存]
+    end
+    
+    %% 连接关系
+    WebBrowser --> EventLoop
+    MobileApp --> EventLoop
+    ApiClient --> EventLoop
+    Microservice --> EventLoop
+    
+    EventLoop --> ListenSocket
+    ListenSocket --> ListenChannel
+    ListenChannel --> EpollManager
+    
+    EventLoop --> SessionManager
+    SessionManager --> HttpSession1
+    SessionManager --> HttpSession2
+    SessionManager --> HttpSessionN
+    
+    HttpSession1 --> RequestParser
+    HttpSession2 --> RequestParser
+    HttpSessionN --> RequestParser
+    
+    RequestParser --> MiddlewareManager
+    MiddlewareManager --> HttpRouter
+    HttpRouter --> RouteHandlers
+    HttpRouter --> StaticFileHandler
+    HttpRouter --> ErrorHandler
+    HttpRouter --> ApiDiscoveryHandler
+    
+    RouteHandlers --> ResponseBuilder
+    StaticFileHandler --> ResponseBuilder
+    ErrorHandler --> ResponseBuilder
+    ApiDiscoveryHandler --> ResponseBuilder
+    
+    ResponseBuilder --> HttpSession1
+    ResponseBuilder --> HttpSession2
+    ResponseBuilder --> HttpSessionN
+    
+    MiddlewareManager --> CorsMiddleware
+    MiddlewareManager --> AuthMiddleware
+    MiddlewareManager --> LoggingMiddleware
+    MiddlewareManager --> RateLimitMiddleware
+    MiddlewareManager --> CustomMiddleware
+    
+    %% 支撑系统连接
+    EventLoop --> ThreadPool
+    EventLoop --> TimingWheel
+    HttpServerCore --> Logger
+    HttpServerCore --> ConfigManager
+    TimingWheel --> PerformanceMonitor
+    
+    %% 存储连接
+    StaticFileHandler --> FileSystem
+    HttpRouter --> RouteCache
+    SessionManager --> SessionCache
+    PerformanceMonitor --> StatsStorage
+    
+    %% 样式
+    classDef clientClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef coreClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef networkClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef sessionClass fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+    classDef processingClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef handlerClass fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    classDef middlewareClass fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef supportClass fill:#efebe9,stroke:#5d4037,stroke-width:2px
+    classDef storageClass fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    
+    class Clients clientClass
+    class NetworkLayer networkClass
+    class SessionLayer sessionClass
+    class ProcessingLayer processingClass
+    class HandlerLayer handlerClass
+    class MiddlewareLayer middlewareClass
+    class SupportSystems supportClass
+    class StorageLayer storageClass
+```
+
+## 2. HTTP服务器启动流程图
+
+```mermaid
+flowchart TD
+    Start([HTTP服务器启动]) --> LoadConfig[加载配置文件<br/>HttpServerConfig]
+    LoadConfig --> ValidateConfig{配置验证}
+    ValidateConfig -->|失败| ConfigError[配置错误,启动失败]
+    ValidateConfig -->|成功| InitComponents[初始化核心组件]
+    
+    InitComponents --> InitRouter[初始化路由器<br/>HttpRouter]
+    InitRouter --> InitMiddleware[初始化中间件管理器<br/>MiddlewareManager]
+    InitMiddleware --> InitThreadPool{初始化线程池}
+    InitThreadPool -->|外部线程池| UseExternalPool[使用外部线程池]
+    InitThreadPool -->|创建新线程池| CreateThreadPool[创建内部线程池]
+    UseExternalPool --> SetupHandlers[设置默认处理器]
+    CreateThreadPool --> SetupHandlers
+    
+    SetupHandlers --> SetupErrorHandler[设置错误处理器]
+    SetupErrorHandler --> SetupNotFoundHandler[设置404处理器]
+    SetupNotFoundHandler --> InitializeServer[初始化服务器<br/>不注册Channel]
+    
+    InitializeServer --> CreateListenSocket[创建监听套接字]
+    CreateListenSocket --> ConfigureSocket[配置套接字选项<br/>REUSEADDR/NODELAY]
+    ConfigureSocket --> BindSocket[绑定地址和端口]
+    BindSocket --> ListenSocket[开始监听连接]
+    ListenSocket --> SetRunning[设置运行状态为true]
+    
+    SetRunning --> StartMonitoring{启动性能监控?}
+    StartMonitoring -->|是| StartTimingWheel[启动时间轮监控]
+    StartMonitoring -->|否| StartEventLoopThread[启动EventLoop线程]
+    StartTimingWheel --> StartEventLoopThread
+    
+    StartEventLoopThread --> CreateEventLoopThread[创建EventLoop线程]
+    CreateEventLoopThread --> WaitEventLoopReady[等待EventLoop创建完成]
+    WaitEventLoopReady --> RegisterChannel[在EventLoop线程中注册Channel]
+    
+    RegisterChannel --> CreateListenChannel[创建监听Channel]
+    CreateListenChannel --> SetReadCallback[设置读取回调<br/>handleNewConnection]
+    SetReadCallback --> EnableReading[启用读取事件]
+    EnableReading --> StartEventLoop[开始事件循环]
+    
+    StartEventLoop --> ServerReady[服务器启动完成]
+    ServerReady --> AcceptConnections[开始接受连接]
+    
+    %% 错误处理
+    ConfigError --> Exit[退出程序]
+    
+    %% 时间轮监控初始化
+    StartTimingWheel --> CreateTimingWheel[创建时间轮]
+    CreateTimingWheel --> StartTimerTicker[启动时间轮ticker线程]
+    StartTimerTicker --> SetupMonitoringTasks[设置监控任务]
+    SetupMonitoringTasks --> StartEventLoopThread
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef networkClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    
+    class LoadConfig,InitComponents,InitRouter,InitMiddleware,CreateThreadPool,UseExternalPool,SetupHandlers,SetupErrorHandler,SetupNotFoundHandler,InitializeServer,CreateListenSocket,ConfigureSocket,BindSocket,ListenSocket,SetRunning,CreateEventLoopThread,WaitEventLoopReady,RegisterChannel,CreateListenChannel,SetReadCallback,EnableReading,CreateTimingWheel,StartTimerTicker,SetupMonitoringTasks processClass
+    class ValidateConfig,InitThreadPool,StartMonitoring decisionClass
+    class ConfigError,Exit errorClass
+    class ServerReady,AcceptConnections,StartEventLoop successClass
+    class BindSocket,ListenSocket,RegisterChannel,CreateListenChannel networkClass
+```
+
+## 3. HTTP请求处理流程图
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant EventLoop as 事件循环
+    participant ListenChannel as 监听通道
+    participant HttpSession as HTTP会话
+    participant MiddlewareManager as 中间件管理器
+    participant HttpRouter as 路由器
+    participant Handler as 处理器
+    participant ThreadPool as 线程池
+    
+    Note over Client, ThreadPool: 完整HTTP请求处理流程
+    
+    %% 连接建立
+    Client->>EventLoop: 建立TCP连接
+    EventLoop->>ListenChannel: 触发读取事件
+    ListenChannel->>EventLoop: 执行handleNewConnection
+    EventLoop->>HttpSession: 创建新会话
+    Note right of HttpSession: 会话配置:<br/>- 读写超时<br/>- Keep-Alive设置<br/>- 回调函数设置
+    
+    %% 请求接收和解析
+    Client->>HttpSession: 发送HTTP请求数据
+    HttpSession->>HttpSession: handleRead() - 读取数据
+    HttpSession->>HttpSession: parseHttpRequest() - 解析请求
+    
+    alt 解析成功
+        HttpSession->>HttpSession: 创建HttpRequest对象
+        HttpSession->>ThreadPool: 提交请求处理任务
+        
+        Note over ThreadPool: 异步处理请求
+        ThreadPool->>MiddlewareManager: 执行中间件链
+        
+        %% 中间件执行
+        MiddlewareManager->>MiddlewareManager: CORS中间件
+        MiddlewareManager->>MiddlewareManager: 日志中间件
+        MiddlewareManager->>MiddlewareManager: 认证中间件
+        MiddlewareManager->>MiddlewareManager: 限流中间件
+        
+        alt 中间件通过
+            MiddlewareManager->>HttpRouter: 路由匹配
+            HttpRouter->>HttpRouter: 匹配路由模式
+            HttpRouter->>HttpRouter: 提取路径参数
+            HttpRouter->>Handler: 调用处理器
+            
+            Handler->>Handler: 业务逻辑处理
+            Handler->>HttpSession: 返回HttpResponse
+            
+        else 中间件拦截
+            MiddlewareManager->>HttpSession: 返回中间件响应
+        end
+        
+        HttpSession->>HttpSession: sendResponse() - 发送响应
+        HttpSession->>Client: 发送HTTP响应数据
+        
+        alt Keep-Alive连接
+            HttpSession->>HttpSession: resetForNextRequest()
+            HttpSession->>HttpSession: 等待下一个请求
+        else 关闭连接
+            HttpSession->>HttpSession: 关闭会话
+            HttpSession->>EventLoop: 清理资源
+        end
+        
+    else 解析失败
+        HttpSession->>HttpSession: 生成400错误响应
+        HttpSession->>Client: 发送错误响应
+        HttpSession->>HttpSession: 关闭连接
+    end
+    
+    %% 异常处理
+    Note over MiddlewareManager, Handler: 异常处理流程
+    alt 处理器异常
+        Handler->>Handler: 捕获异常
+        Handler->>HttpSession: 返回500错误响应
+    end
+    
+    alt 路由未找到
+        HttpRouter->>HttpSession: 返回404错误响应
+    end
+```
+
+## 4. 路由匹配算法流程图
+
+```mermaid
+flowchart TD
+    Start([路由匹配开始]) --> ParsePath[解析请求路径]
+    ParsePath --> GetMethodTree[获取HTTP方法路由树]
+    GetMethodTree --> TreeExists{方法树是否存在?}
+    
+    TreeExists -->|否| NoRoute[路由不存在]
+    TreeExists -->|是| SplitPath[分割路径为段数组]
+    
+    SplitPath --> InitSearch[初始化搜索参数]
+    InitSearch --> SearchLoop[开始路由搜索循环]
+    
+    SearchLoop --> CheckSegment{检查当前路径段}
+    CheckSegment --> StaticMatch{静态匹配?}
+    
+    %% 静态匹配分支
+    StaticMatch -->|是| FindStaticChild[查找静态子节点]
+    FindStaticChild --> StaticChildExists{静态子节点存在?}
+    StaticChildExists -->|是| MoveToStaticChild[移动到静态子节点]
+    StaticChildExists -->|否| TryParamMatch[尝试参数匹配]
+    
+    %% 参数匹配分支
+    StaticMatch -->|否| TryParamMatch
+    TryParamMatch --> ParamChildExists{参数子节点存在?}
+    ParamChildExists -->|是| ExtractParam[提取参数值]
+    ExtractParam --> SaveParam[保存到参数映射]
+    SaveParam --> MoveToParamChild[移动到参数子节点]
+    ParamChildExists -->|否| TryWildcardMatch[尝试通配符匹配]
+    
+    %% 通配符匹配分支
+    TryWildcardMatch --> WildcardExists{通配符子节点存在?}
+    WildcardExists -->|是| CaptureWildcard[捕获剩余路径]
+    CaptureWildcard --> MoveToWildcardChild[移动到通配符子节点]
+    WildcardExists -->|否| NoMatch[无匹配节点]
+    
+    %% 继续搜索或结束
+    MoveToStaticChild --> NextSegment{还有更多路径段?}
+    MoveToParamChild --> NextSegment
+    MoveToWildcardChild --> CheckHandler{节点有处理器?}
+    
+    NextSegment -->|是| SearchLoop
+    NextSegment -->|否| CheckHandler
+    
+    CheckHandler -->|有| FoundMatch[找到匹配路由]
+    CheckHandler -->|无| NoMatch
+    
+    %% 优先级处理
+    FoundMatch --> HasPriority{有优先级设置?}
+    HasPriority -->|是| ComparePriority[比较优先级]
+    HasPriority -->|否| ReturnMatch[返回匹配结果]
+    ComparePriority --> SelectBestMatch[选择最佳匹配]
+    SelectBestMatch --> ReturnMatch
+    
+    %% 错误处理
+    NoRoute --> ReturnNotFound[返回未找到]
+    NoMatch --> ReturnNotFound
+    
+    ReturnMatch --> End([匹配完成])
+    ReturnNotFound --> End
+    
+    %% 路由类型示例
+    subgraph RouteExamples["路由匹配示例"]
+        direction TB
+        Static["静态路由: /api/users"]
+        Param["参数路由: /api/users/{id}"]
+        Wildcard["通配符路由: /static/*"]
+        Complex["复合路由: /api/users/{id}/posts/{post_id}"]
+    end
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef exampleClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class ParsePath,GetMethodTree,SplitPath,InitSearch,SearchLoop,FindStaticChild,ExtractParam,SaveParam,CaptureWildcard,ComparePriority,SelectBestMatch processClass
+    class TreeExists,CheckSegment,StaticMatch,StaticChildExists,ParamChildExists,WildcardExists,NextSegment,CheckHandler,HasPriority decisionClass
+    class FoundMatch,ReturnMatch,End successClass
+    class NoRoute,NoMatch,ReturnNotFound errorClass
+    class RouteExamples exampleClass
+```
+
+## 5. 中间件执行流程图
+
+```mermaid
+flowchart TD
+    Start([中间件执行开始]) --> SortMiddlewares[按优先级排序中间件]
+    SortMiddlewares --> InitContext[初始化中间件上下文]
+    InitContext --> StartExecution[开始执行中间件链]
+    
+    StartExecution --> GetNextMiddleware[获取下一个中间件]
+    GetNextMiddleware --> MiddlewareExists{中间件存在?}
+    
+    MiddlewareExists -->|否| ExecuteFinalHandler[执行最终处理器]
+    MiddlewareExists -->|是| CheckEnabled{中间件启用?}
+    
+    CheckEnabled -->|否| SkipMiddleware[跳过中间件]
+    CheckEnabled -->|是| CheckShouldExecute{检查执行条件}
+    
+    CheckShouldExecute -->|否| SkipMiddleware
+    CheckShouldExecute -->|是| ExecuteMiddleware[执行中间件逻辑]
+    
+    ExecuteMiddleware --> MiddlewareType{中间件类型}
+    
+    %% CORS中间件处理
+    MiddlewareType -->|CORS| CheckCORSRequest{检查CORS请求}
+    CheckCORSRequest -->|预检请求| HandlePreflight[处理预检请求]
+    CheckCORSRequest -->|普通请求| SetCORSHeaders[设置CORS头部]
+    HandlePreflight --> ReturnPreflightResponse[返回预检响应]
+    SetCORSHeaders --> NextMiddleware[调用下一个中间件]
+    ReturnPreflightResponse --> CheckResult{检查执行结果}
+    
+    %% 认证中间件处理
+    MiddlewareType -->|认证| CheckAuthPath{检查路径是否需认证}
+    CheckAuthPath -->|不需要| NextMiddleware
+    CheckAuthPath -->|需要| ExtractToken[提取认证令牌]
+    ExtractToken --> ValidateToken{验证令牌}
+    ValidateToken -->|失败| ReturnAuthError[返回认证错误]
+    ValidateToken -->|成功| NextMiddleware
+    ReturnAuthError --> CheckResult
+    
+    %% 限流中间件处理
+    MiddlewareType -->|限流| GenerateRateKey[生成限流键]
+    GenerateRateKey --> CheckRateLimit{检查限流状态}
+    CheckRateLimit -->|超限| ReturnRateLimit[返回限流错误]
+    CheckRateLimit -->|通过| UpdateRateLimit[更新限流计数]
+    UpdateRateLimit --> NextMiddleware
+    ReturnRateLimit --> CheckResult
+    
+    %% 日志中间件处理
+    MiddlewareType -->|日志| LogRequest[记录请求信息]
+    LogRequest --> NextMiddleware
+    
+    %% 自定义中间件处理
+    MiddlewareType -->|自定义| ExecuteCustomLogic[执行自定义逻辑]
+    ExecuteCustomLogic --> NextMiddleware
+    
+    %% 下一个中间件调用
+    NextMiddleware --> RecursiveCall[递归调用中间件链]
+    RecursiveCall --> CheckResult
+    
+    %% 跳过中间件
+    SkipMiddleware --> GetNextMiddleware
+    
+    %% 结果检查
+    CheckResult --> ResultType{执行结果类型}
+    ResultType -->|CONTINUE| ContinueExecution[继续执行]
+    ResultType -->|STOP| StopExecution[停止执行]
+    ResultType -->|ERROR| HandleError[处理错误]
+    
+    ContinueExecution --> PostProcess[中间件后处理]
+    PostProcess --> UpdateStats[更新执行统计]
+    UpdateStats --> End([中间件执行完成])
+    
+    StopExecution --> UpdateStats
+    HandleError --> LogError[记录错误]
+    LogError --> UpdateStats
+    
+    %% 最终处理器
+    ExecuteFinalHandler --> FinalHandlerExists{最终处理器存在?}
+    FinalHandlerExists -->|是| CallFinalHandler[调用最终处理器]
+    FinalHandlerExists -->|否| DefaultResponse[默认响应]
+    CallFinalHandler --> End
+    DefaultResponse --> End
+    
+    %% 中间件优先级示例
+    subgraph MiddlewarePriority["中间件优先级示例"]
+        direction TB
+        Priority1000["CORS中间件 (1000)"]
+        Priority900["认证中间件 (900)"]
+        Priority800["限流中间件 (800)"]
+        Priority500["自定义中间件 (500)"]
+        Priority100["日志中间件 (100)"]
+    end
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef corsClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef authClass fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+    classDef limitClass fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef logClass fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class SortMiddlewares,InitContext,StartExecution,GetNextMiddleware,SkipMiddleware,ExecuteMiddleware,PostProcess,UpdateStats,CallFinalHandler,DefaultResponse processClass
+    class MiddlewareExists,CheckEnabled,CheckShouldExecute,MiddlewareType,FinalHandlerExists decisionClass
+    class CheckCORSRequest,HandlePreflight,SetCORSHeaders,ReturnPreflightResponse corsClass
+    class CheckAuthPath,ExtractToken,ValidateToken,ReturnAuthError authClass
+    class GenerateRateKey,CheckRateLimit,ReturnRateLimit,UpdateRateLimit limitClass
+    class LogRequest logClass
+    class HandleError,LogError errorClass
+    class ContinueExecution,End successClass
+```
+
+## 6. HTTP会话管理流程图
+
+```mermaid
+flowchart TD
+    Start([新连接到达]) --> CreateSession[创建HTTP会话<br/>HttpSession]
+    CreateSession --> ConfigureSession[配置会话参数]
+    
+    ConfigureSession --> SetTimeouts[设置超时参数<br/>读写/Keep-Alive]
+    SetTimeouts --> SetCallbacks[设置回调函数<br/>请求处理/关闭/错误]
+    SetCallbacks --> SetKeepAlive[配置Keep-Alive<br/>启用状态/最大请求数]
+    SetKeepAlive --> RegisterSession[注册会话到管理器]
+    
+    RegisterSession --> StartSession[启动会话<br/>setState（READING）]
+    StartSession --> WaitForData[等待客户端数据]
+    
+    WaitForData --> DataArrived{数据到达?}
+    DataArrived -->|是| ReadData[读取数据到缓冲区]
+    DataArrived -->|否| CheckTimeout{检查读取超时?}
+    
+    CheckTimeout -->|超时| TimeoutError[处理超时错误]
+    CheckTimeout -->|未超时| WaitForData
+    
+    ReadData --> ParseRequest{解析HTTP请求}
+    ParseRequest -->|成功| ProcessRequest[setState（PROCESSING）<br/>处理请求]
+    ParseRequest -->|数据不完整| WaitForData
+    ParseRequest -->|解析失败| BadRequestError[返回400错误]
+    
+    ProcessRequest --> SubmitToThreadPool[提交到线程池处理]
+    SubmitToThreadPool --> ExecuteHandlers[执行中间件和处理器]
+    ExecuteHandlers --> GenerateResponse[生成HTTP响应]
+    
+    GenerateResponse --> SendResponse[setState（WRITING）<br/>发送响应]
+    SendResponse --> AsyncWrite[异步写入响应数据]
+    
+    AsyncWrite --> WriteComplete{写入完成?}
+    WriteComplete -->|是| CheckConnection{检查连接状态}
+    WriteComplete -->|否| ContinueWrite[继续写入]
+    WriteComplete -->|错误| WriteError[处理写入错误]
+    
+    ContinueWrite --> AsyncWrite
+    
+    CheckConnection --> ShouldKeepAlive{应该保持连接?}
+    ShouldKeepAlive -->|是| ResetForNext[resetForNextRequest（）<br/>重置会话状态]
+    ShouldKeepAlive -->|否| CloseConnection[关闭连接]
+    
+    ResetForNext --> UpdateKeepAlive[更新Keep-Alive计数]
+    UpdateKeepAlive --> CheckMaxRequests{达到最大请求数?}
+    CheckMaxRequests -->|是| CloseConnection
+    CheckMaxRequests -->|否| SetKeepAliveState[setState（KEEP_ALIVE）]
+    SetKeepAliveState --> WaitForData
+    
+    %% 错误处理分支
+    TimeoutError --> GenerateTimeoutResponse[生成超时响应]
+    BadRequestError --> GenerateBadRequestResponse[生成400响应]
+    WriteError --> LogWriteError[记录写入错误]
+    
+    GenerateTimeoutResponse --> CloseConnection
+    GenerateBadRequestResponse --> SendResponse
+    LogWriteError --> CloseConnection
+    
+    %% 连接关闭流程
+    CloseConnection --> setStateCLOSING[setState（CLOSING）]
+    setStateCLOSING --> CleanupResources[清理会话资源]
+    CleanupResources --> CallCloseCallback[调用关闭回调]
+    CallCloseCallback --> UnregisterSession[从管理器注销会话]
+    UnregisterSession --> setStateCLOSED[setState（CLOSED）]
+    setStateCLOSED --> End([会话结束])
+    
+    %% 会话状态图
+    subgraph SessionStates["会话状态转换"]
+        direction TB
+        CONNECTING[CONNECTING<br/>正在建立连接]
+        READING[READING<br/>正在读取请求]
+        PROCESSING[PROCESSING<br/>正在处理请求]
+        WRITING[WRITING<br/>正在发送响应]
+        KEEP_ALIVE[KEEP_ALIVE<br/>Keep-Alive等待]
+        CLOSING[CLOSING<br/>正在关闭连接]
+        CLOSED[CLOSED<br/>连接已关闭]
+        
+        CONNECTING --> READING
+        READING --> PROCESSING
+        PROCESSING --> WRITING
+        WRITING --> KEEP_ALIVE
+        WRITING --> CLOSING
+        KEEP_ALIVE --> READING
+        KEEP_ALIVE --> CLOSING
+        CLOSING --> CLOSED
+    end
+    
+    %% 异步写入队列管理
+    subgraph AsyncWriteSystem["异步写入系统"]
+        direction TB
+        WriteTask[写入任务<br/>AsyncWriteTask]
+        TaskQueue[任务队列<br/>pending_write_tasks]
+        CurrentTask[当前任务<br/>current_write_task]
+        WriteCallback[写入回调<br/>完成通知]
+        
+        WriteTask --> TaskQueue
+        TaskQueue --> CurrentTask
+        CurrentTask --> WriteCallback
+    end
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef stateClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef asyncClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class CreateSession,ConfigureSession,SetTimeouts,SetCallbacks,SetKeepAlive,RegisterSession,StartSession,ReadData,ProcessRequest,SubmitToThreadPool,ExecuteHandlers,GenerateResponse,SendResponse,AsyncWrite,ResetForNext,UpdateKeepAlive,CleanupResources,CallCloseCallback,UnregisterSession processClass
+    class DataArrived,CheckTimeout,ParseRequest,WriteComplete,ShouldKeepAlive,CheckMaxRequests decisionClass
+    class SessionStates stateClass
+    class TimeoutError,BadRequestError,WriteError,GenerateTimeoutResponse,GenerateBadRequestResponse,LogWriteError errorClass
+    class End successClass
+    class AsyncWriteSystem asyncClass
+
+```
+
+## 7. 静态文件服务流程图
+
+```mermaid
+flowchart TD
+    Start([静态文件请求]) --> CheckStaticRoute{匹配静态路由?}
+    CheckStaticRoute -->|否| NotStaticFile[非静态文件请求]
+    CheckStaticRoute -->|是| ExtractFilePath[提取文件路径]
+    
+    ExtractFilePath --> NormalizePath[标准化路径<br/>处理..和./]
+    NormalizePath --> CheckPathSafety[安全性检查<br/>防目录遍历]
+    
+    CheckPathSafety -->|不安全| SecurityError[返回403 Forbidden]
+    CheckPathSafety -->|安全| BuildFullPath[构建完整文件路径]
+    
+    BuildFullPath --> CheckFileExists{文件是否存在?}
+    CheckFileExists -->|否| CheckDirectory{是否为目录?}
+    CheckFileExists -->|是| GetFileInfo[获取文件信息]
+    
+    %% 文件处理分支
+    GetFileInfo --> CheckPermissions{检查读取权限?}
+    CheckPermissions -->|无权限| SecurityError
+    CheckPermissions -->|有权限| CheckFileSize{检查文件大小}
+    
+    CheckFileSize -->|过大| FileTooLarge[返回413实体过大]
+    CheckFileSize -->|合适| DetermineContentType[确定MIME类型]
+    
+    DetermineContentType --> CheckConditionalRequest{条件请求?}
+    CheckConditionalRequest -->|是| HandleConditionalRequest[处理条件请求<br/>ETag/Last-Modified]
+    CheckConditionalRequest -->|否| CheckRangeRequest{Range请求?}
+    
+    HandleConditionalRequest --> NotModified{资源未修改?}
+    NotModified -->|是| Return304[返回304 Not Modified]
+    NotModified -->|否| CheckRangeRequest
+    
+    CheckRangeRequest -->|是| HandleRangeRequest[处理Range请求]
+    CheckRangeRequest -->|否| HandleNormalRequest[处理普通文件请求]
+    
+    %% 普通文件请求处理
+    HandleNormalRequest --> ReadFileContent[读取文件内容]
+    ReadFileContent --> SetFileHeaders[设置文件响应头<br/>Content-Type/Length/Cache]
+    SetFileHeaders --> SendFileResponse[发送文件响应]
+    
+    %% Range请求处理
+    HandleRangeRequest --> ParseRangeHeader[解析Range头部]
+    ParseRangeHeader --> ValidateRange{Range有效?}
+    ValidateRange -->|否| InvalidRange[返回416 Range不满足]
+    ValidateRange -->|是| ReadFileRange[读取文件范围]
+    ReadFileRange --> SetRangeHeaders[设置Range响应头<br/>Content-Range/Length]
+    SetRangeHeaders --> SendRangeResponse[发送部分内容响应<br/>206 Partial Content]
+    
+    %% 目录处理分支
+    CheckDirectory -->|否| FileNotFound[返回404 Not Found]
+    CheckDirectory -->|是| FindIndexFile[查找索引文件<br/>index.html等]
+    
+    FindIndexFile --> IndexExists{索引文件存在?}
+    IndexExists -->|是| ServeIndexFile[服务索引文件]
+    IndexExists -->|否| DirectoryListingEnabled{启用目录浏览?}
+    
+    ServeIndexFile --> GetFileInfo
+    
+    DirectoryListingEnabled -->|否| SecurityError
+    DirectoryListingEnabled -->|是| CheckDirectoryPermission{检查目录权限?}
+    
+    CheckDirectoryPermission -->|无权限| SecurityError
+    CheckDirectoryPermission -->|有权限| IsEmptyDirectory{目录为空?}
+    
+    IsEmptyDirectory -->|是| GenerateEmptyListing[生成空目录页面]
+    IsEmptyDirectory -->|否| GenerateDirectoryListing[生成目录列表页面]
+    
+    GenerateEmptyListing --> SendDirectoryResponse[发送目录响应]
+    GenerateDirectoryListing --> AddDirectoryStats[添加目录统计信息]
+    AddDirectoryStats --> SortDirectoryEntries[排序目录项<br/>目录在前,文件在后]
+    SortDirectoryEntries --> GenerateHTML[生成HTML页面]
+    GenerateHTML --> SendDirectoryResponse
+    
+    %% 缓存处理
+    SetFileHeaders --> SetCacheHeaders[设置缓存头部]
+    SetCacheHeaders --> IsCacheable{文件可缓存?}
+    IsCacheable -->|是| SetCacheControl[设置Cache-Control<br/>ETag/Last-Modified]
+    IsCacheable -->|否| SetNoCacheHeaders[设置no-cache头部]
+    SetCacheControl --> SendFileResponse
+    SetNoCacheHeaders --> SendFileResponse
+    
+    %% 性能优化
+    ReadFileContent --> FileInCache{文件在缓存?}
+    FileInCache -->|是| UseCachedContent[使用缓存内容]
+    FileInCache -->|否| ReadFromDisk[从磁盘读取]
+    ReadFromDisk --> CacheFile[缓存文件内容]
+    CacheFile --> UseCachedContent
+    UseCachedContent --> SetFileHeaders
+    
+    %% 响应发送
+    SendFileResponse --> LogFileAccess[记录文件访问日志]
+    SendRangeResponse --> LogFileAccess
+    SendDirectoryResponse --> LogFileAccess
+    LogFileAccess --> UpdateFileStats[更新文件服务统计]
+    UpdateFileStats --> End([静态文件服务完成])
+    
+    %% 错误处理
+    NotStaticFile --> End
+    SecurityError --> LogSecurityError[记录安全错误]
+    FileTooLarge --> LogSizeError[记录大小错误]
+    FileNotFound --> LogNotFound[记录404错误]
+    InvalidRange --> LogRangeError[记录Range错误]
+    Return304 --> End
+    LogSecurityError --> End
+    LogSizeError --> End
+    LogNotFound --> End
+    LogRangeError --> End
+    
+    %% MIME类型映射示例
+    subgraph MimeTypes["MIME类型映射"]
+        direction TB
+        HTMLType[".html → text/html"]
+        CSSType[".css → text/css"]
+        JSType[".js → text/javascript"]
+        ImageType[".jpg → image/jpeg"]
+        VideoType[".mp4 → video/mp4"]
+        BinaryType["其他 → application/octet-stream"]
+    end
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef cacheClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef mimeClass fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    
+    class ExtractFilePath,NormalizePath,CheckPathSafety,BuildFullPath,GetFileInfo,DetermineContentType,HandleConditionalRequest,HandleNormalRequest,ReadFileContent,SetFileHeaders,HandleRangeRequest,ParseRangeHeader,ReadFileRange,SetRangeHeaders,FindIndexFile,ServeIndexFile,GenerateEmptyListing,GenerateDirectoryListing,AddDirectoryStats,SortDirectoryEntries,GenerateHTML,LogFileAccess,UpdateFileStats processClass
+    class CheckStaticRoute,CheckFileExists,CheckDirectory,CheckPermissions,CheckFileSize,CheckConditionalRequest,NotModified,CheckRangeRequest,ValidateRange,IndexExists,DirectoryListingEnabled,CheckDirectoryPermission,IsEmptyDirectory,IsCacheable,FileInCache decisionClass
+    class SecurityError,FileTooLarge,FileNotFound,InvalidRange,LogSecurityError,LogSizeError,LogNotFound,LogRangeError errorClass
+    class End,Return304,SendFileResponse,SendRangeResponse,SendDirectoryResponse successClass
+    class SetCacheHeaders,SetCacheControl,SetNoCacheHeaders,UseCachedContent,ReadFromDisk,CacheFile cacheClass
+    class MimeTypes mimeClass
+```
+
+## 8. 错误处理和异常管理流程图
+
+```mermaid
+flowchart TD
+    Start([异常/错误发生]) --> ErrorSource{错误来源}
+    
+    ErrorSource -->|网络错误| NetworkError[网络连接错误]
+    ErrorSource -->|解析错误| ParseError[HTTP协议解析错误]
+    ErrorSource -->|处理器错误| HandlerError[请求处理器异常]
+    ErrorSource -->|中间件错误| MiddlewareError[中间件执行异常]
+    ErrorSource -->|系统错误| SystemError[系统资源错误]
+    ErrorSource -->|配置错误| ConfigError[配置文件错误]
+    
+    %% 网络错误处理
+    NetworkError --> NetworkErrorType{网络错误类型}
+    NetworkErrorType -->|连接超时| ConnectionTimeout[连接超时处理]
+    NetworkErrorType -->|连接重置| ConnectionReset[连接重置处理]
+    NetworkErrorType -->|读写错误| IOError[IO错误处理]
+    
+    ConnectionTimeout --> LogNetworkError[记录网络错误]
+    ConnectionReset --> LogNetworkError
+    IOError --> LogNetworkError
+    LogNetworkError --> CloseConnectionGracefully[优雅关闭连接]
+    
+    %% 解析错误处理
+    ParseError --> ParseErrorType{解析错误类型}
+    ParseErrorType -->|请求行错误| BadRequestLine[错误的请求行]
+    ParseErrorType -->|头部格式错误| BadHeaders[错误的头部格式]
+    ParseErrorType -->|请求体错误| BadBody[错误的请求体]
+    ParseErrorType -->|协议版本错误| UnsupportedVersion[不支持的协议版本]
+    
+    BadRequestLine --> Generate400Response[生成400 Bad Request]
+    BadHeaders --> Generate400Response
+    BadBody --> Generate400Response
+    UnsupportedVersion --> Generate505Response[生成505版本不支持]
+    
+    %% 处理器错误处理
+    HandlerError --> CatchException[捕获处理器异常]
+    CatchException --> LogHandlerError[记录处理器错误]
+    LogHandlerError --> ExceptionType{异常类型判断}
+    
+    ExceptionType -->|std::invalid_argument| ValidationError[参数验证错误]
+    ExceptionType -->|std::runtime_error| RuntimeError[运行时错误]
+    ExceptionType -->|std::bad_alloc| MemoryError[内存分配错误]
+    ExceptionType -->|自定义异常| CustomError[自定义业务异常]
+    ExceptionType -->|其他异常| UnknownError[未知异常]
+    
+    ValidationError --> Generate400Response
+    RuntimeError --> Generate500Response[生成500内部错误]
+    MemoryError --> Generate503Response[生成503服务不可用]
+    CustomError --> HandleCustomError[处理自定义异常]
+    UnknownError --> Generate500Response
+    
+    %% 中间件错误处理
+    MiddlewareError --> MiddlewareErrorType{中间件错误类型}
+    MiddlewareErrorType -->|认证失败| AuthenticationError[认证失败]
+    MiddlewareErrorType -->|授权失败| AuthorizationError[授权失败]
+    MiddlewareErrorType -->|限流触发| RateLimitError[限流错误]
+    MiddlewareErrorType -->|CORS错误| CorsError[CORS错误]
+    
+    AuthenticationError --> Generate401Response[生成401未授权]
+    AuthorizationError --> Generate403Response[生成403禁止访问]
+    RateLimitError --> Generate429Response[生成429请求过多]
+    CorsError --> GenerateCorsError[生成CORS错误响应]
+    
+    %% 系统错误处理
+    SystemError --> SystemErrorType{系统错误类型}
+    SystemErrorType -->|文件系统错误| FileSystemError[文件系统错误]
+    SystemErrorType -->|内存不足| OutOfMemory[内存不足]
+    SystemErrorType -->|线程池满| ThreadPoolFull[线程池资源耗尽]
+    SystemErrorType -->|时间轮错误| TimingWheelError[时间轮错误]
+    
+    FileSystemError --> LogSystemError[记录系统错误]
+    OutOfMemory --> LogSystemError
+    ThreadPoolFull --> LogSystemError
+    TimingWheelError --> LogSystemError
+    LogSystemError --> Generate503Response
+    
+    %% 配置错误处理
+    ConfigError --> ConfigErrorType{配置错误类型}
+    ConfigErrorType -->|启动时配置错误| StartupConfigError[启动配置错误]
+    ConfigErrorType -->|运行时配置错误| RuntimeConfigError[运行时配置错误]
+    
+    StartupConfigError --> LogConfigError[记录配置错误]
+    RuntimeConfigError --> LogConfigError
+    LogConfigError --> ServerShutdown[服务器关闭]
+    
+    %% 错误响应生成
+    Generate400Response --> SetErrorHeaders[设置错误响应头]
+    Generate401Response --> SetErrorHeaders
+    Generate403Response --> SetErrorHeaders
+    Generate429Response --> SetErrorHeaders
+    Generate500Response --> SetErrorHeaders
+    Generate503Response --> SetErrorHeaders
+    Generate505Response --> SetErrorHeaders
+    GenerateCorsError --> SetErrorHeaders
+    
+    SetErrorHeaders --> CreateErrorBody[创建错误响应体]
+    CreateErrorBody --> ErrorBodyFormat{错误体格式}
+    ErrorBodyFormat -->|JSON| CreateJSONError[创建JSON错误响应]
+    ErrorBodyFormat -->|HTML| CreateHTMLError[创建HTML错误页面]
+    ErrorBodyFormat -->|Text| CreateTextError[创建文本错误信息]
+    
+    CreateJSONError --> SendErrorResponse[发送错误响应]
+    CreateHTMLError --> SendErrorResponse
+    CreateTextError --> SendErrorResponse
+    
+    %% 自定义错误处理
+    HandleCustomError --> CallErrorHandler{自定义错误处理器存在?}
+    CallErrorHandler -->|是| ExecuteCustomHandler[执行自定义错误处理器]
+    CallErrorHandler -->|否| Generate500Response
+    ExecuteCustomHandler --> SendErrorResponse
+    
+    %% 错误响应发送
+    SendErrorResponse --> UpdateErrorStats[更新错误统计]
+    UpdateErrorStats --> CheckConnectionState{连接状态检查}
+    CheckConnectionState -->|可用| SendToClient[发送到客户端]
+    CheckConnectionState -->|不可用| CloseConnection[关闭连接]
+    
+    SendToClient --> LogErrorResponse[记录错误响应日志]
+    LogErrorResponse --> DecideConnectionFate{决定连接去向}
+    DecideConnectionFate -->|保持连接| ResetForNext[重置等待下一个请求]
+    DecideConnectionFate -->|关闭连接| CloseConnection
+    
+    CloseConnection --> CleanupResources[清理资源]
+    CleanupResources --> End([错误处理完成])
+    
+    ResetForNext --> End
+    ServerShutdown --> End
+    
+    CloseConnectionGracefully --> End
+    
+    %% 错误恢复机制
+    subgraph ErrorRecovery["错误恢复机制"]
+        direction TB
+        AutoRetry[自动重试机制]
+        CircuitBreaker[熔断器保护]
+        FallbackResponse[降级响应]
+        GracefulDegradation[优雅降级]
+    end
+    
+    %% 错误监控告警
+    subgraph ErrorMonitoring["错误监控告警"]
+        direction TB
+        ErrorMetrics[错误指标收集]
+        ErrorAlerts[错误告警机制]
+        ErrorDashboard[错误监控面板]
+        ErrorAnalysis[错误分析报告]
+    end
+    
+    %% 样式
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef responseClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef recoveryClass fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    classDef monitorClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class NetworkError,ParseError,HandlerError,MiddlewareError,SystemError,ConfigError,ConnectionTimeout,ConnectionReset,IOError,BadRequestLine,BadHeaders,BadBody,UnsupportedVersion,ValidationError,RuntimeError,MemoryError,CustomError,UnknownError,AuthenticationError,AuthorizationError,RateLimitError,CorsError,FileSystemError,OutOfMemory,ThreadPoolFull,TimingWheelError,StartupConfigError,RuntimeConfigError errorClass
+    class CatchException,LogHandlerError,LogNetworkError,LogSystemError,LogConfigError,SetErrorHeaders,CreateErrorBody,CreateJSONError,CreateHTMLError,CreateTextError,UpdateErrorStats,LogErrorResponse,CleanupResources processClass
+    class ErrorSource,NetworkErrorType,ParseErrorType,ExceptionType,MiddlewareErrorType,SystemErrorType,ConfigErrorType,ErrorBodyFormat,CallErrorHandler,CheckConnectionState,DecideConnectionFate decisionClass
+    class Generate400Response,Generate401Response,Generate403Response,Generate429Response,Generate500Response,Generate503Response,Generate505Response,GenerateCorsError,HandleCustomError,ExecuteCustomHandler,SendErrorResponse,SendToClient responseClass
+    class ErrorRecovery recoveryClass
+    class ErrorMonitoring monitorClass
+    class End successClass
+```
+
+## 9. 时间轮监控系统流程图
+
+```mermaid
+flowchart TD
+    Start([时间轮监控启动]) --> CheckTimingWheelMode{启用时间轮模式?}
+    CheckTimingWheelMode -->|是| CreateTimingWheel[创建分层时间轮<br/>HierarchicalTimingWheel]
+    CheckTimingWheelMode -->|否| UseThreadMode[使用传统线程模式]
+    
+    CreateTimingWheel --> InitializeTimingWheel[初始化时间轮]
+    InitializeTimingWheel --> ConfigureTimingWheel[配置时间轮参数]
+    
+    ConfigureTimingWheel --> SetTickInterval[设置tick间隔<br/>默认100ms]
+    SetTickInterval --> CreateTimingLevels[创建时间层级<br/>毫秒/秒/分钟/小时]
+    CreateTimingLevels --> StartTimerWheelTicker[启动时间轮ticker线程]
+    
+    StartTimerWheelTicker --> InitMonitoringTasks[初始化监控任务]
+    InitMonitoringTasks --> RegisterStatsTimer[注册统计输出定时器]
+    RegisterStatsTimer --> RegisterTimeoutChecker[注册超时检查定时器]
+    RegisterTimeoutChecker --> RegisterPerformanceMonitor[注册性能监控定时器]
+    
+    %% 定时任务注册
+    RegisterStatsTimer --> CreateStatsTask[创建统计任务<br/>每30秒执行]
+    CreateStatsTask --> AddToTimingWheel1[添加到时间轮]
+    
+    RegisterTimeoutChecker --> CreateTimeoutTask[创建超时检查任务<br/>每10秒执行]
+    CreateTimeoutTask --> AddToTimingWheel2[添加到时间轮]
+    
+    RegisterPerformanceMonitor --> CreatePerfTask[创建性能监控任务<br/>每5秒执行]
+    CreatePerfTask --> AddToTimingWheel3[添加到时间轮]
+    
+    %% 时间轮主循环
+    AddToTimingWheel1 --> StartMainLoop[开始时间轮主循环]
+    AddToTimingWheel2 --> StartMainLoop
+    AddToTimingWheel3 --> StartMainLoop
+    
+    StartMainLoop --> WaitForTick[等待下一个tick]
+    WaitForTick --> TickOccurred[Tick发生]
+    TickOccurred --> AdvanceTimingWheel[推进时间轮]
+    
+    AdvanceTimingWheel --> CheckExpiredTasks[检查到期任务]
+    CheckExpiredTasks --> HasExpiredTask{有到期任务?}
+    
+    HasExpiredTask -->|否| WaitForTick
+    HasExpiredTask -->|是| ExecuteExpiredTasks[执行到期任务]
+    
+    ExecuteExpiredTasks --> TaskType{任务类型判断}
+    TaskType -->|统计任务| ExecuteStatsTask[执行统计任务]
+    TaskType -->|超时检查| ExecuteTimeoutTask[执行超时检查]
+    TaskType -->|性能监控| ExecutePerfTask[执行性能监控]
+    
+    %% 统计任务执行
+    ExecuteStatsTask --> CollectServerStats[收集服务器统计信息]
+    CollectServerStats --> FormatStatsOutput[格式化统计输出]
+    FormatStatsOutput --> LogStatsInfo[输出统计日志]
+    LogStatsInfo --> RescheduleStatsTask[重新调度统计任务]
+    RescheduleStatsTask --> WaitForTick
+    
+    %% 超时检查任务执行
+    ExecuteTimeoutTask --> CheckSessionTimeouts[检查会话超时]
+    CheckSessionTimeouts --> IterateActiveSessions[遍历活跃会话]
+    IterateActiveSessions --> SessionTimedOut{会话超时?}
+    
+    SessionTimedOut -->|是| CloseTimedOutSession[关闭超时会话]
+    SessionTimedOut -->|否| CheckNextSession[检查下一个会话]
+    
+    CloseTimedOutSession --> LogTimeoutEvent[记录超时事件]
+    LogTimeoutEvent --> CheckNextSession
+    CheckNextSession --> MoreSessions{还有更多会话?}
+    MoreSessions -->|是| IterateActiveSessions
+    MoreSessions -->|否| RescheduleTimeoutTask[重新调度超时检查]
+    RescheduleTimeoutTask --> WaitForTick
+    
+    %% 性能监控任务执行
+    ExecutePerfTask --> CollectPerformanceData[收集性能数据]
+    CollectPerformanceData --> CalculateQPS[计算QPS]
+    CalculateQPS --> CalculateResponseTime[计算响应时间]
+    CalculateResponseTime --> CalculateErrorRate[计算错误率]
+    CalculateErrorRate --> CheckPerformanceAlerts[检查性能告警]
+    
+    CheckPerformanceAlerts --> PerformanceAlert{性能告警?}
+    PerformanceAlert -->|是| TriggerAlert[触发性能告警]
+    PerformanceAlert -->|否| UpdatePerfMetrics[更新性能指标]
+    
+    TriggerAlert --> LogPerformanceAlert[记录性能告警]
+    LogPerformanceAlert --> UpdatePerfMetrics
+    UpdatePerfMetrics --> ReschedulePerfTask[重新调度性能监控]
+    ReschedulePerfTask --> WaitForTick
+    
+    %% 传统线程模式
+    UseThreadMode --> CreateMonitoringThread[创建监控线程]
+    CreateMonitoringThread --> ThreadMainLoop[线程主循环]
+    ThreadMainLoop --> SleepInterval[休眠固定间隔]
+    SleepInterval --> CheckStopSignal{检查停止信号?}
+    CheckStopSignal -->|是| ThreadExit[线程退出]
+    CheckStopSignal -->|否| ExecuteMonitoringTasks[执行监控任务]
+    ExecuteMonitoringTasks --> SleepInterval
+    
+    %% 监控停止流程
+    StopMonitoring[停止监控] --> StopTimingWheel{使用时间轮?}
+    StopTimingWheel -->|是| StopTimerWheel[停止时间轮]
+    StopTimingWheel -->|否| StopMonitoringThread[停止监控线程]
+    
+    StopTimerWheel --> CancelAllTasks[取消所有定时任务]
+    CancelAllTasks --> StopTickerThread[停止ticker线程]
+    StopTickerThread --> CleanupTimingWheel[清理时间轮资源]
+    
+    StopMonitoringThread --> SignalThreadStop[发送线程停止信号]
+    SignalThreadStop --> WaitThreadJoin[等待线程结束]
+    
+    CleanupTimingWheel --> MonitoringStopped[监控已停止]
+    WaitThreadJoin --> MonitoringStopped
+    ThreadExit --> MonitoringStopped
+    MonitoringStopped --> End([监控系统结束])
+    
+    %% 时间轮层级结构
+    subgraph TimingWheelStructure["时间轮层级结构"]
+        direction TB
+        Level1[第1层: 毫秒级<br/>0-999ms, 100个槽位]
+        Level2[第2层: 秒级<br/>0-59s, 60个槽位]
+        Level3[第3层: 分钟级<br/>0-59min, 60个槽位]
+        Level4[第4层: 小时级<br/>0-23h, 24个槽位]
+        
+        Level1 --> Level2
+        Level2 --> Level3
+        Level3 --> Level4
+    end
+    
+    %% 监控任务类型
+    subgraph MonitoringTasks["监控任务类型"]
+        direction TB
+        StatsTask[统计信息输出<br/>周期: 30秒]
+        TimeoutTask[超时检查<br/>周期: 10秒]
+        PerfTask[性能监控<br/>周期: 5秒]
+        HealthTask[健康检查<br/>周期: 60秒]
+        CleanupTask[资源清理<br/>周期: 300秒]
+    end
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef timingWheelClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef taskClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef monitorClass fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    classDef threadClass fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class CreateTimingWheel,InitializeTimingWheel,ConfigureTimingWheel,SetTickInterval,CreateTimingLevels,StartTimerWheelTicker,InitMonitoringTasks,RegisterStatsTimer,RegisterTimeoutChecker,RegisterPerformanceMonitor,AdvanceTimingWheel,CheckExpiredTasks,ExecuteExpiredTasks,CollectServerStats,FormatStatsOutput,LogStatsInfo,CheckSessionTimeouts,IterateActiveSessions,CloseTimedOutSession,LogTimeoutEvent,CollectPerformanceData,CalculateQPS,CalculateResponseTime,CalculateErrorRate,CheckPerformanceAlerts,UpdatePerfMetrics processClass
+    class CheckTimingWheelMode,HasExpiredTask,TaskType,SessionTimedOut,MoreSessions,PerformanceAlert,StopTimingWheel,CheckStopSignal decisionClass
+    class CreateTimingWheel,StartMainLoop,WaitForTick,TickOccurred,AddToTimingWheel1,AddToTimingWheel2,AddToTimingWheel3,StopTimerWheel,CancelAllTasks,StopTickerThread,CleanupTimingWheel timingWheelClass
+    class CreateStatsTask,CreateTimeoutTask,CreatePerfTask,ExecuteStatsTask,ExecuteTimeoutTask,ExecutePerfTask,RescheduleStatsTask,RescheduleTimeoutTask,ReschedulePerfTask taskClass
+    class TriggerAlert,LogPerformanceAlert monitorClass
+    class UseThreadMode,CreateMonitoringThread,ThreadMainLoop,SleepInterval,ThreadExit,StopMonitoringThread,SignalThreadStop,WaitThreadJoin threadClass
+    class End,MonitoringStopped successClass
+```
+
+## 10. 性能监控和统计流程图
+
+```mermaid
+flowchart TD
+    Start([性能监控启动]) --> InitializeMetrics[初始化性能指标]
+    InitializeMetrics --> SetupCounters[设置原子计数器]
+    
+    SetupCounters --> SetupConnectionCounters[设置连接计数器]
+    SetupConnectionCounters --> SetupRequestCounters[设置请求计数器]
+    SetupRequestCounters --> SetupResponseCounters[设置响应计数器]
+    SetupResponseCounters --> SetupErrorCounters[设置错误计数器]
+    SetupErrorCounters --> SetupTimingCounters[设置时间计数器]
+    
+    SetupTimingCounters --> InitializeSnapshot[初始化统计快照]
+    InitializeSnapshot --> StartMonitoringLoop[启动监控循环]
+    
+    %% 请求监控流程
+    StartMonitoringLoop --> RequestReceived[请求接收事件]
+    RequestReceived --> IncrementTotalRequests[总请求数+1]
+    IncrementTotalRequests --> IncrementActiveConnections[活跃连接数+1]
+    IncrementActiveConnections --> RecordRequestStart[记录请求开始时间]
+    
+    RecordRequestStart --> ProcessingPhase[请求处理阶段]
+    ProcessingPhase --> MonitorProcessing[监控处理过程]
+    
+    %% 处理过程监控
+    MonitorProcessing --> TrackMiddlewareTime[跟踪中间件执行时间]
+    TrackMiddlewareTime --> TrackRouteTime[跟踪路由匹配时间]
+    TrackRouteTime --> TrackHandlerTime[跟踪处理器执行时间]
+    TrackHandlerTime --> TrackResponseTime[跟踪响应构建时间]
+    
+    %% 响应监控流程
+    TrackResponseTime --> ResponseSent[响应发送事件]
+    ResponseSent --> IncrementTotalResponses[总响应数+1]
+    IncrementTotalResponses --> RecordResponseTime[记录响应时间]
+    RecordResponseTime --> CheckResponseStatus{检查响应状态}
+    
+    CheckResponseStatus -->|2xx| IncrementSuccessCount[成功响应+1]
+    CheckResponseStatus -->|4xx| IncrementClientErrorCount[客户端错误+1]
+    CheckResponseStatus -->|5xx| IncrementServerErrorCount[服务端错误+1]
+    
+    IncrementSuccessCount --> UpdateResponseTimeStats[更新响应时间统计]
+    IncrementClientErrorCount --> UpdateResponseTimeStats
+    IncrementServerErrorCount --> UpdateResponseTimeStats
+    
+    %% 连接监控流程
+    UpdateResponseTimeStats --> CheckConnection{连接状态}
+    CheckConnection -->|Keep-Alive| KeepConnection[保持连接]
+    CheckConnection -->|Close| CloseConnection[关闭连接]
+    
+    KeepConnection --> UpdateKeepAliveStats[更新Keep-Alive统计]
+    CloseConnection --> DecrementActiveConnections[活跃连接数-1]
+    UpdateKeepAliveStats --> ContinueMonitoring[继续监控]
+    DecrementActiveConnections --> ContinueMonitoring
+    
+    %% 性能计算流程
+    ContinueMonitoring --> PeriodicCalculation{定期计算?}
+    PeriodicCalculation -->|是| CalculateMetrics[计算性能指标]
+    PeriodicCalculation -->|否| RequestReceived
+    
+    CalculateMetrics --> CalculateQPS[计算QPS<br/>每秒请求数]
+    CalculateQPS --> CalculateAvgResponseTime[计算平均响应时间]
+    CalculateAvgResponseTime --> CalculatePercentiles[计算响应时间百分位数]
+    
+    CalculatePercentiles --> CalculateP50[计算P50响应时间]
+    CalculateP50 --> CalculateP95[计算P95响应时间]
+    CalculateP95 --> CalculateP99[计算P99响应时间]
+    CalculateP99 --> CalculateMaxResponseTime[计算最大响应时间]
+    
+    CalculateMaxResponseTime --> CalculateErrorRates[计算错误率]
+    CalculateErrorRates --> CalculateSuccessRate[计算成功率]
+    CalculateSuccessRate --> CalculateThroughput[计算吞吐量]
+    
+    %% 资源监控
+    CalculateThroughput --> MonitorResources[监控系统资源]
+    MonitorResources --> GetCPUUsage[获取CPU使用率]
+    GetCPUUsage --> GetMemoryUsage[获取内存使用率]
+    GetMemoryUsage --> GetConnectionCount[获取连接数统计]
+    GetConnectionCount --> GetThreadPoolStats[获取线程池统计]
+    
+    %% 存储和展示
+    GetThreadPoolStats --> UpdateStatsSnapshot[更新统计快照]
+    UpdateStatsSnapshot --> StoreMetrics[存储性能指标]
+    StoreMetrics --> GenerateReport[生成性能报告]
+    
+    GenerateReport --> LogMetrics[输出指标日志]
+    LogMetrics --> CheckAlerts[检查性能告警]
+    
+    %% 告警机制
+    CheckAlerts --> AlertConditions{告警条件检查}
+    AlertConditions -->|CPU过高| CPUAlert[CPU使用率告警]
+    AlertConditions -->|内存不足| MemoryAlert[内存使用告警]
+    AlertConditions -->|响应时间过长| ResponseTimeAlert[响应时间告警]
+    AlertConditions -->|错误率过高| ErrorRateAlert[错误率告警]
+    AlertConditions -->|连接数过多| ConnectionAlert[连接数告警]
+    
+    CPUAlert --> TriggerAlert[触发告警]
+    MemoryAlert --> TriggerAlert
+    ResponseTimeAlert --> TriggerAlert
+    ErrorRateAlert --> TriggerAlert
+    ConnectionAlert --> TriggerAlert
+    
+    TriggerAlert --> SendNotification[发送告警通知]
+    SendNotification --> LogAlert[记录告警日志]
+    LogAlert --> ContinueMonitoring
+    
+    %% 正常情况
+    AlertConditions -->|正常| ContinueMonitoring
+    
+    %% API统计接口
+    subgraph StatsAPI["统计信息API"]
+        direction TB
+        GetStats[GET /stats - 获取统计快照]
+        GetHealth[GET /health - 健康检查]
+        GetMetrics[GET /metrics - 详细指标]
+        GetPerformance[GET /debug/performance - 性能调试]
+    end
+    
+    %% 统计数据结构
+    subgraph MetricsData["性能指标数据结构"]
+        direction TB
+        ConnectionMetrics[连接指标<br/>- 总连接数<br/>- 活跃连接数<br/>- 平均连接时长]
+        RequestMetrics[请求指标<br/>- 总请求数<br/>- QPS<br/>- 请求大小分布]
+        ResponseMetrics[响应指标<br/>- 总响应数<br/>- 响应时间分布<br/>- 状态码分布]
+        ErrorMetrics[错误指标<br/>- 错误总数<br/>- 错误率<br/>- 错误类型分布]
+        ResourceMetrics[资源指标<br/>- CPU使用率<br/>- 内存使用率<br/>- 线程池状态]
+    end
+    
+    %% 性能优化建议
+    subgraph PerformanceOptimization["性能优化策略"]
+        direction TB
+        ConnectionPooling[连接池优化<br/>- Keep-Alive调优<br/>- 连接数限制<br/>- 超时设置]
+        ThreadPoolOptimization[线程池优化<br/>- 线程数调优<br/>- 任务队列大小<br/>- 拒绝策略]
+        CacheOptimization[缓存优化<br/>- 路由缓存<br/>- 静态文件缓存<br/>- 响应缓存]
+        IOOptimization[IO优化<br/>- 缓冲区大小<br/>- 零拷贝<br/>- 批量处理]
+    end
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef metricsClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef alertClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef apiClass fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    classDef dataClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef optimClass fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class InitializeMetrics,SetupCounters,SetupConnectionCounters,SetupRequestCounters,SetupResponseCounters,SetupErrorCounters,SetupTimingCounters,InitializeSnapshot,IncrementTotalRequests,IncrementActiveConnections,RecordRequestStart,MonitorProcessing,TrackMiddlewareTime,TrackRouteTime,TrackHandlerTime,TrackResponseTime,IncrementTotalResponses,RecordResponseTime,UpdateResponseTimeStats,UpdateKeepAliveStats,DecrementActiveConnections processClass
+    class CheckResponseStatus,CheckConnection,PeriodicCalculation,AlertConditions decisionClass
+    class CalculateMetrics,CalculateQPS,CalculateAvgResponseTime,CalculatePercentiles,CalculateP50,CalculateP95,CalculateP99,CalculateMaxResponseTime,CalculateErrorRates,CalculateSuccessRate,CalculateThroughput,MonitorResources,GetCPUUsage,GetMemoryUsage,GetConnectionCount,GetThreadPoolStats,UpdateStatsSnapshot,StoreMetrics,GenerateReport,LogMetrics metricsClass
+    class CPUAlert,MemoryAlert,ResponseTimeAlert,ErrorRateAlert,ConnectionAlert,TriggerAlert,SendNotification,LogAlert alertClass
+    class StatsAPI apiClass
+    class MetricsData dataClass
+    class PerformanceOptimization optimClass
+    class ContinueMonitoring successClass
+```
+
+## 11. WebSocket集成扩展流程图
+
+```mermaid
+flowchart TD
+    Start([WebSocket请求到达]) --> CheckUpgradeRequest{WebSocket升级请求?}
+    CheckUpgradeRequest -->|否| NormalHTTPRequest[普通HTTP请求处理]
+    CheckUpgradeRequest -->|是| ValidateUpgradeHeaders[验证升级头部]
+    
+    ValidateUpgradeHeaders --> CheckConnection{Connection头部正确?}
+    CheckConnection -->|否| BadUpgradeRequest[返回400错误]
+    CheckConnection -->|是| CheckUpgrade{Upgrade头部正确?}
+    
+    CheckUpgrade -->|否| BadUpgradeRequest
+    CheckUpgrade -->|是| CheckWebSocketKey{Sec-WebSocket-Key存在?}
+    
+    CheckWebSocketKey -->|否| BadUpgradeRequest
+    CheckWebSocketKey -->|是| GenerateAcceptKey[生成Sec-WebSocket-Accept]
+    
+    GenerateAcceptKey --> CheckProtocol{检查子协议?}
+    CheckProtocol -->|不支持| UnsupportedProtocol[不支持的协议]
+    CheckProtocol -->|支持| CreateWebSocketResponse[创建WebSocket升级响应]
+    
+    CreateWebSocketResponse --> SendUpgradeResponse[发送101 Switching Protocols]
+    SendUpgradeResponse --> UpgradeConnection[升级连接为WebSocket]
+    
+    UpgradeConnection --> CreateWebSocketHandler[创建WebSocket处理器]
+    CreateWebSocketHandler --> RegisterWebSocketCallbacks[注册WebSocket回调]
+    RegisterWebSocketCallbacks --> ShareEventLoop[共享HTTP服务器的EventLoop]
+    
+    ShareEventLoop --> StartWebSocketLoop[启动WebSocket事件循环]
+    StartWebSocketLoop --> WaitForWebSocketData[等待WebSocket数据]
+    
+    WaitForWebSocketData --> WebSocketDataReceived{数据接收?}
+    WebSocketDataReceived -->|是| ParseWebSocketFrame[解析WebSocket帧]
+    WebSocketDataReceived -->|否| CheckWebSocketTimeout{检查超时?}
+    
+    CheckWebSocketTimeout -->|超时| CloseWebSocketConnection[关闭WebSocket连接]
+    CheckWebSocketTimeout -->|未超时| WaitForWebSocketData
+    
+    ParseWebSocketFrame --> FrameType{帧类型判断}
+    FrameType -->|文本帧| HandleTextFrame[处理文本消息]
+    FrameType -->|二进制帧| HandleBinaryFrame[处理二进制消息]
+    FrameType -->|关闭帧| HandleCloseFrame[处理关闭帧]
+    FrameType -->|Ping帧| HandlePingFrame[处理Ping帧]
+    FrameType -->|Pong帧| HandlePongFrame[处理Pong帧]
+    FrameType -->|控制帧| HandleControlFrame[处理控制帧]
+    
+    HandleTextFrame --> ProcessMessage[处理消息内容]
+    HandleBinaryFrame --> ProcessMessage
+    HandleCloseFrame --> SendCloseResponse[发送关闭响应]
+    HandlePingFrame --> SendPongResponse[发送Pong响应]
+    HandlePongFrame --> UpdateHeartbeat[更新心跳状态]
+    HandleControlFrame --> ProcessControlMessage[处理控制消息]
+    
+    ProcessMessage --> CallMessageHandler[调用消息处理器]
+    CallMessageHandler --> GenerateResponse[生成响应消息]
+    GenerateResponse --> SendWebSocketMessage[发送WebSocket消息]
+    
+    SendWebSocketMessage --> ContinueWebSocketLoop[继续WebSocket循环]
+    SendPongResponse --> ContinueWebSocketLoop
+    UpdateHeartbeat --> ContinueWebSocketLoop
+    ProcessControlMessage --> ContinueWebSocketLoop
+    ContinueWebSocketLoop --> WaitForWebSocketData
+    
+    SendCloseResponse --> WebSocketClosed[WebSocket连接关闭]
+    CloseWebSocketConnection --> WebSocketClosed
+    WebSocketClosed --> CleanupWebSocketResources[清理WebSocket资源]
+    CleanupWebSocketResources --> End([WebSocket处理结束])
+    
+    %% 错误处理
+    BadUpgradeRequest --> End
+    UnsupportedProtocol --> End
+    NormalHTTPRequest --> End
+    
+    %% WebSocket与HTTP服务器集成
+    subgraph HTTPServerIntegration["与HTTP服务器集成"]
+        direction TB
+        SharedEventLoop[共享EventLoop<br/>统一事件处理]
+        SharedThreadPool[共享ThreadPool<br/>异步消息处理]
+        SharedLogger[共享Logger<br/>统一日志记录]
+        SharedConfig[共享ConfigManager<br/>统一配置管理]
+        
+        SharedEventLoop --> SharedThreadPool
+        SharedThreadPool --> SharedLogger
+        SharedLogger --> SharedConfig
+    end
+    
+    %% WebSocket特性支持
+    subgraph WebSocketFeatures["WebSocket功能特性"]
+        direction TB
+        MessageTypes[消息类型支持<br/>文本/二进制/控制帧]
+        Heartbeat[心跳检测<br/>Ping/Pong机制]
+        Compression[消息压缩<br/>permessage-deflate]
+        Extensions[扩展支持<br/>自定义扩展]
+        Subprotocols[子协议支持<br/>协议协商]
+        
+        MessageTypes --> Heartbeat
+        Heartbeat --> Compression  
+        Compression --> Extensions
+        Extensions --> Subprotocols
+    end
+    
+    %% WebSocket消息流
+    subgraph WebSocketMessageFlow["WebSocket消息流"]
+        direction TB
+        ClientMessage[客户端消息]
+        FrameParsing[帧解析]
+        MessageValidation[消息验证]
+        BusinessLogic[业务逻辑处理]
+        ResponseGeneration[响应生成]
+        FrameConstruction[帧构造]
+        ServerMessage[服务端消息]
+        
+        ClientMessage --> FrameParsing
+        FrameParsing --> MessageValidation
+        MessageValidation --> BusinessLogic
+        BusinessLogic --> ResponseGeneration
+        ResponseGeneration --> FrameConstruction
+        FrameConstruction --> ServerMessage
+    end
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef webSocketClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef integrationClass fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    classDef featureClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef flowClass fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class ValidateUpgradeHeaders,GenerateAcceptKey,CreateWebSocketResponse,SendUpgradeResponse,UpgradeConnection,CreateWebSocketHandler,RegisterWebSocketCallbacks,ShareEventLoop,StartWebSocketLoop,ParseWebSocketFrame,HandleTextFrame,HandleBinaryFrame,HandleCloseFrame,HandlePingFrame,HandlePongFrame,HandleControlFrame,ProcessMessage,CallMessageHandler,GenerateResponse,SendWebSocketMessage,SendPongResponse,UpdateHeartbeat,ProcessControlMessage,CleanupWebSocketResources processClass
+    class CheckUpgradeRequest,CheckConnection,CheckUpgrade,CheckWebSocketKey,CheckProtocol,WebSocketDataReceived,CheckWebSocketTimeout,FrameType decisionClass
+    class StartWebSocketLoop,WaitForWebSocketData,ContinueWebSocketLoop,SendCloseResponse,WebSocketClosed webSocketClass
+    class BadUpgradeRequest,UnsupportedProtocol,CloseWebSocketConnection errorClass
+    class HTTPServerIntegration integrationClass
+    class WebSocketFeatures featureClass
+    class WebSocketMessageFlow flowClass
+    class End successClass
+```
+
+## 12. 微服务集成架构流程图
+
+```mermaid
+graph TB
+    %% 微服务生态系统
+    subgraph MicroserviceEcosystem["微服务生态系统"]
+        direction TB
+        
+        subgraph APIGateway["API网关层"]
+            Gateway[API网关服务<br/>8080端口]
+        end
+        
+        subgraph CoreServices["核心服务层"]
+            AuthService[认证服务<br/>8008端口<br/>HttpServer]
+            UserService[用户服务<br/>8082端口<br/>HttpServer] 
+            GameDataService[游戏数据服务<br/>8083端口<br/>HttpServer]
+        end
+        
+        subgraph GameServices["游戏服务层"]
+            GomokuService[五子棋服务<br/>8084端口<br/>HttpServer + WebSocket]
+            OtherGameServices[其他游戏服务<br/>HttpServer框架]
+        end
+        
+        subgraph SharedInfrastructure["共享基础设施"]
+            HTTPFramework[HTTP服务器框架<br/>common::http]
+            NetworkFramework[网络框架<br/>common::network]
+            ThreadPoolFramework[线程池框架<br/>common::thread_pool]
+            LoggingFramework[日志框架<br/>common::logger]
+            ConfigFramework[配置框架<br/>common::config]
+        end
+    end
+    
+    %% 客户端层
+    subgraph ClientLayer["客户端层"]
+        WebClient[Web客户端]
+        MobileClient[移动客户端]
+        GameClient[游戏客户端]
+        APIClient[API客户端]
+    end
+    
+    %% 存储层
+    subgraph StorageLayer["存储层"]
+        MySQL[MySQL数据库]
+        Redis[Redis缓存]
+        FileStorage[文件存储]
+    end
+    
+    %% 消息队列
+    subgraph MessageQueue["消息队列"]
+        Kafka[Kafka消息队列]
+    end
+    
+    %% 连接关系 - 客户端到网关
+    WebClient --> Gateway
+    MobileClient --> Gateway
+    GameClient --> Gateway
+    APIClient --> Gateway
+    
+    %% 网关到服务
+    Gateway --> AuthService
+    Gateway --> UserService
+    Gateway --> GameDataService
+    Gateway --> GomokuService
+    Gateway --> OtherGameServices
+    
+    %% 服务间通信
+    AuthService -.->|服务发现注册| Gateway
+    UserService -.->|服务发现注册| Gateway
+    GameDataService -.->|服务发现注册| Gateway
+    GomokuService -.->|服务发现注册| Gateway
+    
+    %% 服务间依赖
+    GomokuService --> UserService
+    GomokuService --> GameDataService
+    GomokuService --> AuthService
+    UserService --> AuthService
+    
+    %% 基础设施依赖
+    AuthService --> HTTPFramework
+    UserService --> HTTPFramework
+    GameDataService --> HTTPFramework
+    GomokuService --> HTTPFramework
+    OtherGameServices --> HTTPFramework
+    
+    HTTPFramework --> NetworkFramework
+    HTTPFramework --> ThreadPoolFramework
+    HTTPFramework --> LoggingFramework
+    HTTPFramework --> ConfigFramework
+    
+    %% 存储连接
+    AuthService --> MySQL
+    UserService --> MySQL
+    GameDataService --> MySQL
+    GomokuService --> MySQL
+    
+    AuthService --> Redis
+    UserService --> Redis
+    GameDataService --> Redis
+    GomokuService --> Redis
+    
+    GomokuService --> FileStorage
+    
+    %% 消息队列连接
+    AuthService --> Kafka
+    UserService --> Kafka
+    GameDataService --> Kafka
+    GomokuService --> Kafka
+    
+    %% HTTP服务器框架特性展示
+    subgraph HTTPServerFeatures["HTTP服务器框架特性"]
+        direction TB
+        EventDriven[事件驱动架构<br/>高并发处理]
+        MiddlewareSupport[中间件支持<br/>CORS/认证/限流/日志]
+        RouterSystem[路由系统<br/>静态/参数/通配符路由]
+        SessionManagement[会话管理<br/>Keep-Alive/超时控制]
+        StaticFileServing[静态文件服务<br/>缓存/Range支持]
+        PerformanceMonitoring[性能监控<br/>时间轮/统计信息]
+        WebSocketSupport[WebSocket支持<br/>实时双向通信]
+        APIDiscovery[API发现<br/>OpenAPI/服务注册]
+        
+        EventDriven --> MiddlewareSupport
+        MiddlewareSupport --> RouterSystem
+        RouterSystem --> SessionManagement
+        SessionManagement --> StaticFileServing
+        StaticFileServing --> PerformanceMonitoring
+        PerformanceMonitoring --> WebSocketSupport
+        WebSocketSupport --> APIDiscovery
+    end
+    
+    %% 部署架构
+    subgraph DeploymentArchitecture["部署架构"]
+        direction TB
+        LoadBalancer[负载均衡器<br/>Nginx/HAProxy]
+        ServiceDiscovery[服务发现<br/>Consul/Eureka]
+        ConfigCenter[配置中心<br/>Apollo/Nacos]
+        MonitoringSystem[监控系统<br/>Prometheus/Grafana]
+        LogAggregation[日志聚合<br/>ELK Stack]
+        
+        LoadBalancer --> ServiceDiscovery
+        ServiceDiscovery --> ConfigCenter
+        ConfigCenter --> MonitoringSystem
+        MonitoringSystem --> LogAggregation
+    end
+    
+    %% 样式定义
+    classDef clientClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef gatewayClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px
+    classDef coreServiceClass fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef gameServiceClass fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+    classDef frameworkClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef storageClass fill:#fff8e1,stroke:#f57f17,stroke-width:2px
+    classDef messageClass fill:#e0f2f1,stroke:#00695c,stroke-width:2px
+    classDef featureClass fill:#efebe9,stroke:#5d4037,stroke-width:2px
+    classDef deployClass fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px
+    
+    %% 应用样式
+    class ClientLayer clientClass
+    class Gateway gatewayClass
+    class CoreServices coreServiceClass
+    class GameServices gameServiceClass
+    class SharedInfrastructure frameworkClass
+    class StorageLayer storageClass
+    class MessageQueue messageClass
+    class HTTPServerFeatures featureClass
+    class DeploymentArchitecture deployClass
+```
+
+## 总结
+
+HTTP服务器框架业务流程图详细展示了以下核心流程：
+
+1. **整体架构**：展现了HTTP服务器的完整技术栈和组件关系
+2. **启动流程**：从配置加载到服务就绪的完整启动过程
+3. **请求处理**：从连接建立到响应发送的完整请求生命周期
+4. **路由匹配**：基于前缀树的高效路由匹配算法
+5. **中间件执行**：按优先级执行的中间件链处理流程
+6. **会话管理**：HTTP连接的完整生命周期管理
+7. **静态文件服务**：完整的静态文件处理和缓存机制
+8. **错误处理**：全面的错误分类和处理机制
+9. **时间轮监控**：高效的定时任务和监控系统
+10. **性能监控**：详细的性能指标收集和分析
+11. **WebSocket扩展**：与HTTP服务器的无缝集成
+12. **微服务集成**：在微服务架构中的定位和作用
+
+这些流程图为HTTP服务器框架的使用、维护和扩展提供了完整的技术参考。
+

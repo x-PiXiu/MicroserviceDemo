@@ -1,0 +1,178 @@
+# API网关服务配置文件
+# Game Microservices API Gateway Configuration
+# 版本: 1.0.0
+# 作者: 29108
+# 日期: 2025/7/21
+
+# ==================== 服务基础配置 ====================
+http:
+  server:
+    # HTTP协议配置
+    max_request_size: 1048576       # 最大请求大小（1MB）
+    max_header_size: 8192           # 最大头部大小（8KB）
+    keep_alive_timeout_ms: 60000    # Keep-Alive超时时间（60秒）
+    request_timeout_ms: 30000       # 3请求超时时间（30秒）
+    max_keep_alive_requests: 1024   # 单连接最大请求数
+
+    # 线程池配置
+    enable_thread_pool: true        # 是否启用线程池
+    worker_threads: 0               # 自动获取线程数
+
+    # 性能优化配置
+    enable_tcp_nodelay: true        # 禁用Nagle算法
+    send_buffer_size: 65535         # 发送缓冲区大小（64KB）
+    receive_buffer_size: 65535      # 接收缓冲区大小（64KB）
+    enable_keep_alive: true         # 启用keep-alive
+    linger_timeout: 0               # SO_LINGER超时时间（0=立即关闭）
+    enable_so_linger: true          # 启用SO_LINGER
+    enable_so_reuseaddr: true       # 启用SO_REUSEADDR
+
+    # 安全配置
+    enable_cors: true               # 启用CORS
+    cors_origins: "*"               # CORS允许的源
+    cors_methods: "GET,POST,PUT,DELETE,OPTIONS,HEAD,PATCH"
+    cors_headers: "Content-Type,Authorization,Accept,Origin,X-Requested-With,Cache-Control,X-File-Name,X-File-Size"
+    cors_exposed_headers: "Content-Type,Authorization,Accept,Origin,X-Requested-With,Cache-Control,X-File-Name,X-File-Size"
+    cors_allow_credentials: true
+
+    # 监控配置
+    enable_performance_monitoring: true  # 启用性能监控
+    stats_interval_ms: 5000         # 统计间隔（5秒）
+
+    # 静态文件服务配置
+    enable_directory_listing: false;     #启用目录浏览
+    max_static_file_size: 100 * 1024 * 1024; #最大静态文件大小（100MB）
+    static_file_cache_time: 3600;         #静态文件缓存时间（秒）
+
+# ==================== 中间件配置 ====================
+
+middleware:
+  cors:
+    enable: true
+    cors_methods: "GET,POST,PUT,DELETE,OPTIONS,HEAD,PATCH"
+    cors_headers: "Content-Type,Authorization,Accept,Origin,X-Requested-With,Cache-Control,X-File-Name,X-File-Size"
+    cors_exposed_headers: "Content-Type,Authorization,Accept,Origin,X-Requested-With,Cache-Control,X-File-Name,X-File-Size"
+    allow_credentials: false                      # 是否允许携带 Cookie
+    max_age: 86400                                # 预检请求缓存时间（秒）
+
+  auth:
+    enable: true
+    secret_key: "your_jwt_secret_key_here_32_chars_or_more"  # 必须设置！
+    token_header: "Authorization"                           # 通常不变
+    token_prefix: "Bearer "                                 # 通常不变
+    token_expiry_hours: 24                                  # Token 有效期
+    exclude_paths: # 免认证路径
+      - /api/v1/login
+      - /api/v1/register
+      - /api/v1/public/*
+      - /health
+
+  rate_limiting:
+    enable: true
+    requests_per_minute: 60           # 每分钟最多 60 次请求
+    burst_size: 10                    # 允许突发 10 次（令牌桶算法）
+    key_generator: "ip"               # 限流维度：ip / user / custom
+    exclude_paths: # 不限流的路径
+      - /health
+      - /metrics
+      - /api/v1/public/status
+
+
+  circuit_breaker:
+    enable: true
+
+
+# ==================== 网络配置 ====================
+network:
+  bind_address: "0.0.0.0"
+  port: 8081
+  backlog: 1024                     # 监听队列长度，对应Socket::listen()中的硬编码值1024 决定了系统可以排队等待accept()的连接数量
+  reuse_address: true               # 是否启用SO_REUSEADDR选项，允许重用TIME_WAIT状态的地址 解决服务器重启时"Address already in use"错误
+  reuse_port: false                 # 是否启用SO_REUSEPORT选项，允许多个socket绑定同一地址 支持多进程/多线程服务器架构，需要Linux 3.9+内核支持
+  tcp_no_delay: true                # 是否启用TCP_NODELAY选项，禁用Nagle算法 启用后立即发送数据，降低延迟但可能增加网络包数量
+  socket_keep_alive: true           # 是否启用SO_KEEPALIVE选项，启用TCP层保活机制 定期发送保活探测包检测连接状态，自动清理死连接
+  keep_alive_idle_time: 600         # Keep-Alive详细参数（对应Socket::configureKeepAliveParameters()） TCP Keep-Alive空闲时间（秒），开始探测前的空闲时间 连接空闲多长时间后开始发送keep-alive探测包
+  keep_alive_interval: 60           # TCP Keep-Alive探测间隔（秒），探测包发送间隔 每次探测包之间的时间间隔
+  keep_alive_probes: 3              # TCP Keep-Alive最大探测次数 连续探测失败多少次后认为连接已断开
+
+  # ==================== Epoll配置 ====================
+  enable_epoll: true                # 是否启用epoll，通常应该保持true 控制是否使用epoll进行IO多路复用
+  epoll_timeout: 100                # Epoll等待超时时间（毫秒），对应EventLoop::loop()中的10秒超时 控制epoll_wait()的超时时间，影响事件循环的响应性
+  max_events: 1024                  # Epoll最大事件数，对应Epoll中的MAX_EVENTS常量 限制单次epoll_wait()返回的最大事件数量
+  init_event_list_size: 48          # Epoll初始事件列表大小，对应Epoll::KInitEventListSize常量 初始分配的epoll_event数组大小，影响内存使用和性能
+
+  # ==================== EventLoop配置 ====================
+  enable_event_loop_monitoring: true  # 是否启用事件循环监控，控制调试日志输出 启用后会记录事件循环的详细运行信息
+  wakeup_fd_flags: 0                  # eventfd创建标志，用于线程间通信的eventfd选项 控制createEventfd()函数中的标志位设置
+  enable_pending_functors_optimization: true  # 是否启用待处理回调函数的优化 控制pendingFunctors的处理策略优化
+
+  # ==================== 线程池集成配置 ====================
+  enable_thread_pool: false           # 是否启用线程池处理回调，控制异步处理开关 false时保持原有同步处理方式，true时启用异步处理
+  thread_pool_size: 4                 # 网络模块专用线程池大小 当enable_thread_pool为true时，创建的线程池线程数量
+  use_dedicated_io_threads: false     # 是否使用专用IO线程，控制IO处理策略 true时为IO操作分配专门的线程池
+
+  # ==================== 性能优化配置 ====================
+  enable_channel_validation: true     # 是否启用Channel指针验证，控制安全检查 启用后在fillActiveChannels()中进行严格的指针验证
+  enable_epoll_resize_optimization: true  # 是否启用Epoll事件列表动态调整优化 控制events_数组的智能扩容机制
+  epoll_resize_factor: 1.5            # Epoll事件列表扩容因子，控制内存增长策略 当事件列表满载时，按此因子扩容（如1.5倍）
+
+
+thread_pool:
+  # ==================== 线程池基础配置 ====================
+  core_pool_size: 4
+  maximum_pool_size: 16
+  keep_alive_time_ms: 60000
+  queue_capacity: 1024
+
+  # ==================== 线程池高级配置 ====================
+  allow_core_thread_timeout: false
+  rejection_policy: "abort" # abort/discard/caller_runs
+  prestart_all_core_threads: false
+  thread_priority: 0
+  thread_name_prefix: "pool-"
+
+  # ==================== 监控配置 ====================
+  enable_monitoring: true
+  monitoring_interval_ms: 5000
+  enable_thread_dump: false
+
+
+# ==================== 数据库配置 ====================
+database:
+  mysql:
+    host: "dev-mysql"                # 改为localhost，更可靠
+    port: 3306
+    database: "auth_sessions_db"
+    username: "root"
+    password: "123456"
+    pool_size: 20                    # 增加连接池大小
+    max_pool_size: 100               # 增加最大连接数
+    connection_timeout: 15           # 增加连接超时时间
+    query_timeout: 30                # 增加查询超时时间
+    enable_ssl: false
+    charset: "utf8mb4"
+    idle_timeout: 600                # 10分钟空闲超时
+
+  redis:
+    host: "redis"
+    port: 6379
+    password: "123456"
+    database: 0
+    pool_size: 20                    # 增加初始连接数
+    max_pool_size: 50                # 增加最大连接数
+    connection_timeout: 10           # 增加连接超时
+    read_timeout: 5
+    write_timeout: 5
+    idle_timeout: 300                # 5分钟空闲超时
+
+
+
+
+# ==================== 日志配置 ====================
+logging:
+  level: "INFO"                    # 日志级别
+  file: "logs/http_server.log"     # 日志文件路径
+  max_file_size_mb: 100            # 最大文件大小
+  max_files: 10                    # 最大文件数量
+  enable_console: true             # 是否启用控制台输出
+  enable_file: true                # 是否启用文件输出

@@ -1,0 +1,153 @@
+graph TB
+    %% 客户端和网络层
+    Client[客户端<br/>Postman/Browser/App]
+    Network[网络层<br/>TCP Socket]
+    
+    %% HTTP服务器核心组件
+    HttpServer[HttpServer<br/>主服务器类]
+    EventLoop[EventLoop<br/>事件循环]
+    ListenSocket[Listen Socket<br/>监听套接字]
+    ThreadPool[ThreadPool<br/>线程池]
+    
+    %% 会话管理
+    SessionManager[Session Manager<br/>会话管理器]
+    HttpSession[HttpSession<br/>HTTP会话]
+    Channel[Channel<br/>网络通道]
+    
+    %% 请求处理核心
+    HttpRequest[HttpRequest<br/>请求解析器]
+    RequestValidator[Request Validator<br/>请求验证器]
+    MiddlewareManager[Middleware Manager<br/>中间件管理器]
+    HttpRouter[HttpRouter<br/>路由管理器]
+    
+    %% 中间件层
+    CorsMiddleware[CORS中间件]
+    AuthMiddleware[认证中间件]
+    LoggingMiddleware[日志中间件]
+    RateLimitMiddleware[限流中间件]
+    
+    %% 业务处理层
+    RouteHandler[Route Handler<br/>路由处理器]
+    BusinessLogic[Business Logic<br/>业务逻辑]
+    
+    %% 响应处理
+    HttpResponse[HttpResponse<br/>响应构建器]
+    ResponseSender[Response Sender<br/>响应发送器]
+    
+    %% 存储和外部服务
+    Database[(数据库<br/>MySQL/Redis)]
+    ExternalAPI[External API<br/>外部服务]
+    FileSystem[File System<br/>静态文件]
+    
+    %% ===========================================
+    %% 流程定义 - 连接建立阶段
+    %% ===========================================
+    
+    Client -->|1. TCP连接请求| Network
+    Network -->|2. 接受连接| ListenSocket
+    ListenSocket -->|3. 新连接事件| EventLoop
+    EventLoop -->|4. 处理连接| HttpServer
+    HttpServer -->|5. 创建会话| HttpSession
+    HttpSession -->|6. 注册Channel| Channel
+    Channel -->|7. 监听读事件| EventLoop
+    
+    %% ===========================================
+    %% 流程定义 - 请求接收和解析阶段
+    %% ===========================================
+    
+    Client -->|HTTP请求数据| HttpSession
+    HttpSession -->|8. 读取数据| HttpRequest
+    HttpRequest -->|9. 解析请求行| HttpRequest
+    HttpRequest -->|10. 解析头部| HttpRequest
+    HttpRequest -->|11. 解析请求体| HttpRequest
+    HttpRequest -->|12. 验证请求| RequestValidator
+    
+    %% 验证失败流程
+    RequestValidator -->|验证失败| ErrorResponse[错误响应<br/>400 Bad Request]
+    ErrorResponse --> HttpResponse
+    
+    %% ===========================================
+    %% 流程定义 - 中间件处理阶段
+    %% ===========================================
+    
+    RequestValidator -->|13. 验证通过| MiddlewareManager
+    MiddlewareManager -->|14. 执行CORS| CorsMiddleware
+    CorsMiddleware -->|15. 执行认证| AuthMiddleware
+    AuthMiddleware -->|16. 执行日志| LoggingMiddleware
+    LoggingMiddleware -->|17. 执行限流| RateLimitMiddleware
+    
+    %% 中间件拦截流程
+    CorsMiddleware -->|CORS失败| ErrorResponse
+    AuthMiddleware -->|认证失败| ErrorResponse
+    RateLimitMiddleware -->|限流触发| ErrorResponse
+    
+    %% ===========================================
+    %% 流程定义 - 路由匹配和业务处理阶段
+    %% ===========================================
+    
+    RateLimitMiddleware -->|18. 中间件通过| HttpRouter
+    HttpRouter -->|19. 路由匹配| RouteHandler
+    HttpRouter -->|路由未找到| NotFoundResponse[404 Not Found]
+    NotFoundResponse --> HttpResponse
+    
+    RouteHandler -->|20. 执行业务逻辑| BusinessLogic
+    BusinessLogic -->|21. 数据库操作| Database
+    BusinessLogic -->|22. 调用外部API| ExternalAPI
+    BusinessLogic -->|23. 文件操作| FileSystem
+    
+    Database -->|返回数据| BusinessLogic
+    ExternalAPI -->|返回结果| BusinessLogic
+    FileSystem -->|返回文件| BusinessLogic
+    
+    %% ===========================================
+    %% 流程定义 - 响应构建和发送阶段
+    %% ===========================================
+    
+    BusinessLogic -->|24. 构建响应| HttpResponse
+    HttpResponse -->|25. 设置状态码| HttpResponse
+    HttpResponse -->|26. 设置头部| HttpResponse
+    HttpResponse -->|27. 设置响应体| HttpResponse
+    HttpResponse -->|28. 异步发送| ResponseSender
+    
+    ResponseSender -->|29. 写入Socket| HttpSession
+    HttpSession -->|30. 管理连接| ConnectionManager[Connection Manager<br/>连接管理]
+    
+    %% Keep-Alive 流程
+    ConnectionManager -->|Keep-Alive| HttpSession
+    ConnectionManager -->|关闭连接| Client
+    
+    %% ===========================================
+    %% 流程定义 - 错误处理和监控
+    %% ===========================================
+    
+    HttpSession -->|异常处理| ErrorHandler[Error Handler<br/>错误处理器]
+    ErrorHandler -->|记录错误| Logger[Logger<br/>日志系统]
+    ErrorHandler -->|生成错误响应| HttpResponse
+    
+    %% 性能监控
+    HttpServer -->|统计信息| PerformanceMonitor[Performance Monitor<br/>性能监控]
+    PerformanceMonitor -->|输出指标| Logger
+    
+    %% ===========================================
+    %% 样式定义
+    %% ===========================================
+    
+    classDef clientStyle fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef serverStyle fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef networkStyle fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef middlewareStyle fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef businessStyle fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+    classDef errorStyle fill:#ffebee,stroke:#b71c1c,stroke-width:2px
+    classDef storageStyle fill:#e0f2f1,stroke:#004d40,stroke-width:2px
+    
+    class Client clientStyle
+    class HttpServer,EventLoop,HttpSession,HttpRequest,HttpResponse serverStyle
+    class Network,ListenSocket,Channel networkStyle
+    class CorsMiddleware,AuthMiddleware,LoggingMiddleware,RateLimitMiddleware,MiddlewareManager middlewareStyle
+    class RouteHandler,BusinessLogic,HttpRouter businessStyle
+    class ErrorResponse,ErrorHandler,NotFoundResponse errorStyle
+    class Database,ExternalAPI,FileSystem storageStyle
+
+
+
+

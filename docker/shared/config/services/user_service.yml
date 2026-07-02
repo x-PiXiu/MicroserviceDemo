@@ -1,0 +1,327 @@
+# =============================================================================
+# 用户核心服务配置文件 - Docker 容器版本
+# 版本: 1.0.0
+# 说明: 使用环境变量配置，适配 Docker 容器环境
+# =============================================================================
+
+# ==================== 服务基础配置 ====================
+server:
+  name: "user_service"
+  version: "1.0.0"
+  description: "用户核心服务 - 管理用户基础数据"
+  environment: "${ENVIRONMENT}"
+
+# ==================== 网络配置 ====================
+network:
+  host: "0.0.0.0"
+  port: ${USER_SERVICE_INTERNAL_PORT}
+  worker_threads: ${WORKER_THREADS}
+  io_threads: ${IO_THREADS}
+  max_connections: 1000
+  connection_timeout: 30
+  keep_alive_timeout: 30
+  send_buffer_size: 1024
+  recv_buffer_size: 1024
+  read_timeout: 60
+  write_timeout: 60
+  backlog: 1024
+  reuse_address: true
+  tcp_no_delay: true
+  keep_alive: true
+  enable_epoll: true
+
+# ==================== 服务基础配置 ====================
+http:
+  server:
+    max_request_size: 1048576
+    max_header_size: 8192
+    keep_alive_timeout_ms: 60000
+    request_timeout_ms: 30000
+    max_keep_alive_requests: 1024
+    enable_thread_pool: true
+    worker_threads: 0
+    enable_tcp_nodelay: true
+    send_buffer_size: 65535
+    receive_buffer_size: 65535
+    enable_keep_alive: true
+    linger_timeout: 0
+    enable_so_linger: true
+    enable_so_reuseaddr: true
+    enable_performance_monitoring: true
+    stats_interval_ms: 30000
+    enable_directory_listing: false
+    max_static_file_size: 104857600
+    static_file_cache_time: 3600
+
+# ==================== 数据库配置 ====================
+mysql:
+  host: "${MYSQL_HOST}"
+  port: ${MYSQL_EXTERNAL_PORT}
+  username: "${MYSQL_USER}"
+  password: "${MYSQL_ROOT_PASSWORD}"
+  database: "user_service_db"
+  charset: "utf8mb4"
+  collation: "utf8mb4_general_ci"
+  enable_async_operations: true
+  thread_pool_core_size: 4
+  thread_pool_max_size: 16
+  thread_pool_keep_alive_ms: 60000
+  thread_pool_queue_capacity: 1000
+  thread_pool_enable_monitoring: true
+
+  pool:
+    initial_size: 5
+    max_size: ${MYSQL_POOL_SIZE}
+    min_size: 2
+    max_idle: 10
+    max_wait_time: 5000
+    max_idle_time_ms: 600000
+    validation_query: "SELECT 1"
+    validation_interval_ms: 30000
+    test_on_borrow: true
+    test_on_return: false
+    test_while_idle: true
+
+  mysql_connect_timeout_ms: 5000
+  mysql_read_timeout_ms: 5000
+  mysql_write_timeout_ms: 5000
+  mysql_auto_reconnect: true
+  mysql_max_reconnect_attempts: 3
+  mysql_reconnect_interval_ms: 30000
+
+  mysql_use_ssl: false
+  mysql_ssl_ca: ""
+  mysql_ssl_cert: ""
+  mysql_ssl_key: ""
+  mysql_ssl_cipher: ""
+  mysql_ssl_verify_server_cert: false
+
+  mysql_max_allowed_packet: 67108864
+  mysql_net_buffer_length: 16384
+  mysql_compress: false
+  mysql_init_command: ""
+
+  mysql_isolation_level: "REPEATABLE-READ"
+  mysql_autocommit: true
+  mysql_lock_wait_timeout: 50000
+
+# ==================== Redis 配置 ====================
+redis:
+  host: "${REDIS_HOST}"
+  port: ${REDIS_EXTERNAL_PORT}
+  password: "${REDIS_PASSWORD}"
+  database: 3
+
+  enable_async_operations: true
+  thread_pool_core_size: 4
+  thread_pool_max_size: 16
+  thread_pool_keep_alive_ms: 60000
+  thread_pool_queue_capacity: 1000
+  thread_pool_enable_monitoring: true
+
+  pool_size: 5
+  max_pool_size: ${REDIS_POOL_SIZE}
+  min_pool_size: 2
+  pool_timeout_ms: 5000
+  pool_max_idle_time_ms: 600000
+  pool_test_on_borrow: true
+  pool_test_on_return: false
+  pool_validation_interval_ms: 30000
+
+  connect_timeout_ms: 2000
+  socket_timeout_ms: 3000
+  command_timeout_ms: 3000
+  tcp_keepalive: false
+  tcp_keepalive_idle: 60
+  tcp_keepalive_interval: 30
+  tcp_keepalive_count: 3
+
+  auto_reconnect: true
+  max_reconnect_attempts: 3
+  reconnect_interval_ms: 1000
+  retry_attempts: 2
+  retry_delay_ms: 500
+
+  cluster_enabled: false
+  cluster_max_redirections: 5
+  cluster_require_full_coverage: true
+
+  sentinel_enabled: false
+  sentinel_master_name: "mymaster"
+  sentinel_password: ""
+  sentinel_timeout_ms: 5000
+
+  use_ssl: false
+  ssl_cert_file: ""
+  ssl_key_file: ""
+  ssl_ca_file: ""
+  ssl_verify_peer: false
+  ssl_ciphers: ""
+
+  pipeline_size: 10
+  enable_pipeline: false
+  max_memory_policy: 0
+  compress_data: false
+
+  cache:
+    default_ttl: 300
+    user_info_ttl: 300
+    user_profile_ttl: 600
+    user_preferences_ttl: 1800
+
+# ==================== 线程池配置 ====================
+thread_pool:
+  core_size: 16
+  max_size: 24
+  keep_alive_ms: 60000
+  queue_capacity: 1024
+  allow_core_timeout: false
+  rejection_policy: "abort"
+  prestart_core_threads: false
+  thread_priority: 5
+  name_prefix: "user-service-"
+  enable_monitoring: false
+  monitoring_interval_ms: 5000
+  enable_thread_dump: false
+
+# ==================== 服务注册中心配置 ====================
+service_registry:
+  enabled: true
+  host: "${SERVICE_REGISTRY_HOST}"
+  port: ${SERVICE_REGISTRY_INTERNAL_PORT}
+  heartbeat_interval_s: 30
+  register_timeout_s: 10
+  request_timeout_ms: 5000
+  auto_heartbeat: true
+  auto_reconnect: true
+  reconnect_delay_s: 5
+  metadata:
+    service_type: "core"
+    region: "cn-east"
+
+# ==================== 用户数据配置 ====================
+user_data:
+  validation:
+    username:
+      min_length: 3
+      max_length: 50
+      pattern: "^[a-zA-Z0-9_-]+$"
+    password:
+      min_length: 8
+      max_length: 128
+      require_uppercase: true
+      require_lowercase: true
+      require_numbers: true
+      require_special_chars: false
+    email:
+      max_length: 255
+      strict_validation: true
+    nickname:
+      min_length: 1
+      max_length: 100
+  defaults:
+    language: "zh-CN"
+    timezone: "Asia/Shanghai"
+    theme: "light"
+    notifications:
+      email: true
+      push: true
+      sms: false
+    session_timeout: 3600
+  limits:
+    max_sessions_per_user: 5
+    session_cleanup_interval: 3600
+
+# ==================== 日志配置 ====================
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: true
+    path: "/app/logs/user_service.log"
+    max_size: 536870912
+    max_files: 5
+  async:
+    enabled: false
+  level: "${LOG_LEVEL}"
+
+# ==================== Kafka配置 ====================
+kafka:
+  enable: ${USE_KAFKA}
+  topic_prefix: "game_microservices"
+
+  producer:
+    brokers: "${KAFKA_HOST}:${KAFKA_PORT}"
+    client_id: ""
+    acks: "all"
+    retries: 3
+    batch_size: 16384
+    linger_ms: 1
+    buffer_memory: 33554432
+    compression_type: "snappy"
+    max_request_size: 1048576
+    request_timeout_ms: 30000
+    delivery_timeout_ms: 120000
+    enable_idempotence: true
+    max_in_flight_requests: 5
+    security_protocol: "PLAINTEXT"
+    sasl:
+      mechanism: "PLAIN"
+      username: ""
+      password: ""
+    ssl:
+      ca_location: ""
+      certificate_location: ""
+      key_location: ""
+      key_password: ""
+
+  consumer:
+    brokers: "${KAFKA_HOST}:${KAFKA_PORT}"
+    group_id: "user_service_cluster"
+    client_id: ""
+    auto_offset_reset: "latest"
+    enable_auto_commit: true
+    auto_commit_interval_ms: 1000
+    session_timeout_ms: 30000
+    heartbeat_interval_ms: 10000
+    max_poll_interval_ms: 300000
+    max_poll_records: 500
+    fetch_min_bytes: 1
+    fetch_max_wait_ms: 500
+    max_partition_fetch_bytes: 1048576
+    check_crcs: true
+    isolation_level: "read_uncommitted"
+    security_protocol: "PLAINTEXT"
+    sasl:
+      mechanism: "PLAIN"
+      username: ""
+      password: ""
+    ssl:
+      ca_location: ""
+      certificate_location: ""
+      key_location: ""
+      key_password: ""
+
+# ==================== JWT 认证配置 ====================
+jwt:
+  secret_key: "${JWT_SECRET_KEY}"
+  issuer: "game-microservices-auth"
+  audience: "game-microservices-clients"
+  algorithm: "HS256"
+  clock_skew_seconds: 60
+  validate_issuer: true
+  validate_audience: false
+  validate_expiration: true
+
+# ==================== 认证中间件配置 ====================
+auth_middleware:
+  enabled: true
+  token_header: "Authorization"
+  token_prefix: "Bearer "
+  exclude_paths:
+    - "/health"
+    - "/info"
+    - "/stats"
+    - "/api/v1/service/endpoints"
+    - "/api/v1/user/check-username"
+    - "/api/v1/user/check-email"

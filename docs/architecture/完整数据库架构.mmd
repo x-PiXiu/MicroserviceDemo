@@ -1,0 +1,172 @@
+```mermaid
+graph TB
+    %% =======================================================================
+    %% 当前项目数据库架构现状分析图
+    %% 版本: 2025-09-19
+    %% 问题: 新旧架构并存，数据冗余严重
+    %% =======================================================================
+    
+    %% 用户交互层
+    subgraph "👤 用户层"
+        User[🖥️ 游戏客户端<br/>Web/Mobile/Desktop]
+    end
+    
+    %% 服务层 (混乱状态)
+    subgraph "🌐 服务层 (混乱状态)"
+        Gateway[🌐 API网关<br/>:8081]
+        
+        subgraph "认证服务状态"
+            AuthService[🔐 认证服务<br/>:8008<br/>❓状态未知]
+            AuthNote[📝 可能在使用:<br/>• game_microservices.users ❌<br/>• auth_sessions_db ✅]
+        end
+        
+        subgraph "用户服务状态"  
+            UserService[👤 用户服务<br/>:8082<br/>❓可能未启动]
+            UserNote[📝 设计完成但可能:<br/>• 未部署启动 ❌<br/>• 数据库未创建 ❌]
+        end
+        
+        subgraph "游戏数据服务状态"
+            GameDataService[🎮 游戏数据服务<br/>:8083<br/>❓可能未启动]
+            GameDataNote[📝 设计完成但可能:<br/>• 未部署启动 ❌<br/>• 数据库未创建 ❌]
+        end
+        
+        subgraph "五子棋服务状态"
+            GomokuService[🎯 五子棋服务<br/>:8084<br/>✅ 运行中]
+            GomokuNote[📝 确定在使用:<br/>• gomoku_game_db ❌<br/>• 包含重复用户数据]
+        end
+    end
+    
+    %% 数据库层 (混乱并存)
+    subgraph "🗄️ 数据库架构现状 (新旧并存)"
+        
+        %% 旧架构数据库 (问题数据库)
+        subgraph "❌ 旧架构数据库 (存在问题)"
+            OldMainDB[(game_microservices<br/>❌ 单体数据库)]
+            OldMainTables["📋 包含所有数据:<br/>• users (用户基础信息) ❌<br/>• game_user_data (游戏数据) ❌<br/>• user_sessions (会话) ❌<br/>• game_servers (服务器信息)<br/>• security_events (安全事件)<br/>• user_devices (设备信息)"]
+            
+            OldGomokuDB[(gomoku_game_db<br/>❌ 独立游戏数据库)]
+            OldGomokuTables["📋 五子棋数据:<br/>• gomoku_users ❌ 重复用户数据<br/>• gomoku_games (游戏记录)<br/>• gomoku_moves (移动记录)<br/>• gomoku_rooms (房间信息)"]
+        end
+        
+        %% 新架构数据库 (理想状态)
+        subgraph "✅ 新架构数据库 (设计完成)"
+            NewUserDB[(user_service_db<br/>✅ 用户核心数据)]
+            NewUserTables["📋 用户核心表:<br/>• users (基础用户信息)<br/>• user_profiles (用户档案)<br/>• user_friends (好友关系)<br/>• user_preferences (偏好设置)<br/>• user_sessions (登录会话)"]
+            
+            NewGameDB[(game_service_db<br/>✅ 跨游戏数据)]
+            NewGameTables["📋 游戏数据表:<br/>• user_game_profiles (游戏档案)<br/>• game_achievements (成就系统)<br/>• user_inventory (道具系统)<br/>• user_currency (虚拟货币)<br/>• currency_transactions (交易记录)"]
+            
+            NewAuthDB[(auth_sessions_db<br/>✅ 认证专用数据)]
+            NewAuthTables["📋 认证专用表:<br/>• user_sessions (会话管理)<br/>• jwt_blacklist (令牌黑名单)<br/>• auth_audit_logs (认证审计)<br/>• login_rate_limits (登录限流)<br/>• security_events (安全事件)"]
+            
+            NewGomokuDB[(gomoku_business_db<br/>✅ 五子棋业务数据)]
+            NewGomokuTables["📋 五子棋业务表:<br/>• gomoku_rooms (房间管理)<br/>• gomoku_games (游戏记录)<br/>• gomoku_moves (移动记录)<br/>• gomoku_tournaments (锦标赛)<br/>• gomoku_replays (棋谱回放)"]
+        end
+    end
+    
+    %% 缓存层
+    subgraph "⚡ 缓存层"
+        Redis[(Redis :6379<br/>缓存和会话存储)]
+    end
+    
+    %% 当前连接关系 (混乱状态)
+    User --> Gateway
+    Gateway --> AuthService
+    Gateway --> GomokuService
+    
+    %% 数据库连接 (问题连接)
+    AuthService -.->|"❓ 可能连接"| OldMainDB
+    AuthService -.->|"❓ 或者连接"| NewAuthDB
+    
+    GomokuService -.->|"✅ 确定连接"| OldGomokuDB
+    
+    %% 未使用的服务 (虚线表示)
+    UserService -.->|"❓ 未启动"| NewUserDB
+    GameDataService -.->|"❓ 未启动"| NewGameDB
+    
+    %% 数据库内部关系
+    OldMainDB --- OldMainTables
+    OldGomokuDB --- OldGomokuTables
+    NewUserDB --- NewUserTables  
+    NewGameDB --- NewGameTables
+    NewAuthDB --- NewAuthTables
+    NewGomokuDB --- NewGomokuTables
+    
+    %% 缓存连接
+    AuthService -.-> Redis
+    GomokuService -.-> Redis
+    
+    %% =======================================================================
+    %% 问题标注和说明
+    %% =======================================================================
+    
+    subgraph "🚨 当前架构问题分析"
+        Problem1[❌ 数据冗余问题:<br/>• users 表在多个数据库中重复<br/>• game_microservices.users<br/>• gomoku_game_db.gomoku_users]
+        
+        Problem2[❌ 服务状态混乱:<br/>• 用户服务可能未启动<br/>• 游戏数据服务可能未启动<br/>• 认证服务不确定使用哪个数据库]
+        
+        Problem3[❌ 架构不一致:<br/>• 新旧数据库并存<br/>• 服务不知道该连接哪个数据库<br/>• 数据同步困难]
+        
+        Problem4[❌ 维护困难:<br/>• 用户信息更新需要多处修改<br/>• 数据一致性无法保证<br/>• 监控和备份复杂]
+    end
+    
+    %% =======================================================================
+    %% 迁移状态说明
+    %% =======================================================================
+    
+    subgraph "📋 迁移状态说明"
+        Status1[📊 数据库创建状态:<br/>• ✅ 新架构数据库SQL已设计<br/>• ❓ 是否已执行创建脚本未知<br/>• ❓ 数据是否已迁移未知]
+        
+        Status2[🔄 服务部署状态:<br/>• ✅ 认证服务 (可能使用旧架构)<br/>• ❓ 用户服务 (设计完成，未部署)<br/>• ❓ 游戏数据服务 (设计完成，未部署)<br/>• ✅ 五子棋服务 (使用旧架构)]
+        
+        Status3[📝 配置文件状态:<br/>• 🔄 新旧配置文件并存<br/>• ❓ 服务使用哪个配置未知<br/>• 🔄 数据库连接配置混乱]
+    end
+    
+    %% =======================================================================
+    %% 建议的迁移路径
+    %% =======================================================================
+    
+    subgraph "🎯 建议的迁移路径"
+        Step1[1️⃣ 检查数据库状态<br/>确认哪些数据库已创建]
+        Step2[2️⃣ 执行数据迁移<br/>将数据从旧库迁移到新库]
+        Step3[3️⃣ 启动新服务<br/>用户服务和游戏数据服务]
+        Step4[4️⃣ 更新服务配置<br/>指向新的数据库]
+        Step5[5️⃣ 验证功能<br/>确保所有功能正常]
+        Step6[6️⃣ 清理旧数据<br/>备份后删除旧架构数据]
+        
+        Step1 --> Step2
+        Step2 --> Step3  
+        Step3 --> Step4
+        Step4 --> Step5
+        Step5 --> Step6
+    end
+    
+    %% =======================================================================
+    %% 样式定义
+    %% =======================================================================
+    
+    %% 问题组件样式
+    classDef problemDB fill:#ffebee,stroke:#f44336,stroke-width:3px,color:#c62828;
+    classDef problemService fill:#fff3e0,stroke:#ff9800,stroke-width:2px,color:#ef6c00;
+    classDef unknownStatus fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px,color:#7b1fa2;
+    
+    %% 正常组件样式
+    classDef newArchitecture fill:#e8f5e8,stroke:#4caf50,stroke-width:3px,color:#2e7d32;
+    classDef runningService fill:#e3f2fd,stroke:#2196f3,stroke-width:2px,color:#1565c0;
+    classDef cache fill:#fce4ec,stroke:#e91e63,stroke-width:2px,color:#ad1457;
+    
+    %% 说明文本样式  
+    classDef problemText fill:#ffcdd2,stroke:#f44336,stroke-width:2px,color:#b71c1c;
+    classDef statusText fill:#e1bee7,stroke:#9c27b0,stroke-width:2px,color:#4a148c;
+    classDef stepText fill:#c8e6c9,stroke:#4caf50,stroke-width:2px,color:#1b5e20;
+    
+    %% 应用样式
+    class OldMainDB,OldGomokuDB problemDB;
+    class AuthService,UserService,GameDataService unknownStatus;
+    class GomokuService runningService;
+    class NewUserDB,NewGameDB,NewAuthDB,NewGomokuDB newArchitecture;
+    class Redis cache;
+    class Problem1,Problem2,Problem3,Problem4 problemText;
+    class Status1,Status2,Status3 statusText;
+    class Step1,Step2,Step3,Step4,Step5,Step6 stepText;
+```

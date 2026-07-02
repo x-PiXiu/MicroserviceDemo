@@ -1,0 +1,1070 @@
+# API网关服务业务流程图
+
+## 1. API网关整体架构图
+
+```mermaid
+graph TB
+    %% 外部系统
+    Client[客户端应用]
+    WebApp[Web应用]
+    MobileApp[移动应用]
+    
+    %% API网关核心
+    subgraph Gateway["API网关服务 (8080)"]
+        direction TB
+        HTTPServer[HTTP服务器]
+        RouteManager[路由管理器]
+        ServiceDiscovery[服务发现]
+        LoadBalancer[负载均衡器]
+        AuthMiddleware[认证中间件]
+        RateLimiter[限流器]
+        CircuitBreaker[熔断器]
+        PerformanceMonitor[性能监控器]
+        ServiceRegistry[服务注册器]
+    end
+    
+    %% 网关数据存储
+    RouteCache[(路由缓存<br/>Redis)]
+    ServiceCache[(服务缓存<br/>内存)]
+    
+    %% 微服务集群
+    AuthSvc[认证服务<br/>8008]
+    UserSvc[用户服务<br/>8082]
+    GameSvc[游戏数据服务<br/>8083]
+    OtherSvc[其他微服务<br/>8xxx]
+    
+    %% 外部依赖
+    External[外部API<br/>第三方服务]
+    
+    %% 连接关系
+    Client --> HTTPServer
+    WebApp --> HTTPServer
+    MobileApp --> HTTPServer
+    
+    HTTPServer --> AuthMiddleware
+    AuthMiddleware --> RateLimiter
+    RateLimiter --> CircuitBreaker
+    CircuitBreaker --> RouteManager
+    
+    RouteManager --> ServiceDiscovery
+    ServiceDiscovery --> LoadBalancer
+    LoadBalancer --> ServiceRegistry
+    
+    %% 数据存储
+    RouteManager --> RouteCache
+    ServiceDiscovery --> ServiceCache
+    
+    %% 微服务连接
+    LoadBalancer -->|动态路由| AuthSvc
+    LoadBalancer -->|动态路由| UserSvc
+    LoadBalancer -->|动态路由| GameSvc
+    LoadBalancer -->|动态路由| OtherSvc
+    
+    %% 服务注册
+    AuthSvc -.->|注册/心跳| ServiceRegistry
+    UserSvc -.->|注册/心跳| ServiceRegistry
+    GameSvc -.->|注册/心跳| ServiceRegistry
+    OtherSvc -.->|注册/心跳| ServiceRegistry
+    
+    %% 性能监控
+    HTTPServer -.-> PerformanceMonitor
+    RouteManager -.-> PerformanceMonitor
+    LoadBalancer -.-> PerformanceMonitor
+    
+    %% 外部服务
+    LoadBalancer -.->|代理转发| External
+    
+    %% 样式
+    classDef gatewayClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef serviceClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef clientClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef cacheClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef coreClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class Gateway gatewayClass
+    class AuthSvc,UserSvc,GameSvc,OtherSvc serviceClass
+    class Client,WebApp,MobileApp,External clientClass
+    class RouteCache,ServiceCache cacheClass
+    class RouteManager,ServiceDiscovery,LoadBalancer,AuthMiddleware coreClass
+```
+
+## 2. API网关启动流程图
+
+```mermaid
+flowchart TD
+    Start([网关启动]) --> LoadConfig[加载配置文件]
+    LoadConfig --> ValidateConfig{配置验证}
+    ValidateConfig -->|失败| ConfigError[配置错误,启动失败]
+    ValidateConfig -->|成功| InitComponents[初始化核心组件]
+    
+    InitComponents --> InitThreadPool[初始化线程池]
+    InitThreadPool --> InitRouteManager[初始化路由管理器]
+    InitRouteManager --> InitServiceDiscovery[初始化服务发现]
+    InitServiceDiscovery --> InitLoadBalancer[初始化负载均衡器]
+    
+    InitLoadBalancer --> InitRateLimiter[初始化限流器]
+    InitRateLimiter --> InitCircuitBreaker[初始化熔断器]
+    InitCircuitBreaker --> InitPerformanceMonitor{初始化性能监控}
+    InitPerformanceMonitor -->|失败| Warning1[记录警告,继续启动]
+    InitPerformanceMonitor -->|成功| InitServiceRegistry[初始化服务注册器]
+    Warning1 --> InitServiceRegistry
+    
+    InitServiceRegistry --> InitHTTPServer[初始化HTTP服务器]
+    InitHTTPServer --> SetupRoutes[设置网关路由]
+    SetupRoutes --> SetupMiddleware[设置中间件]
+    
+    SetupMiddleware --> SetupCORS[设置CORS中间件]
+    SetupCORS --> SetupAuth[设置认证中间件]
+    SetupAuth --> SetupRateLimit[设置限流中间件]
+    SetupRateLimit --> SetupMonitoring[设置监控中间件]
+    
+    SetupMonitoring --> StartHTTPServer{启动HTTP服务器}
+    StartHTTPServer -->|失败| StartError[启动失败]
+    StartHTTPServer -->|成功| RegisterGatewayRoutes[注册网关管理API]
+    
+    RegisterGatewayRoutes --> RegisterServiceDiscovery[注册服务发现API]
+    RegisterServiceDiscovery --> SetupAPIForwarding[设置API转发路由]
+    SetupAPIForwarding --> EnableDynamicRouting[启用动态路由]
+    
+    EnableDynamicRouting --> StartServiceDiscovery{启动服务发现}
+    StartServiceDiscovery -->|失败| Warning2[记录警告,继续运行]
+    StartServiceDiscovery -->|成功| StartHealthCheck[启动健康检查]
+    Warning2 --> StartHealthCheck
+    
+    StartHealthCheck --> StartPerformanceMonitor[启动性能监控]
+    StartPerformanceMonitor --> GatewayReady[网关启动完成]
+    
+    GatewayReady --> WaitingForServices[等待微服务注册]
+    WaitingForServices --> Running[网关运行中<br/>处理请求和管理服务]
+    
+    %% 错误处理
+    ConfigError --> Exit[退出程序]
+    StartError --> Exit
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef warningClass fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+    
+    class LoadConfig,InitComponents,InitThreadPool,InitRouteManager,InitServiceDiscovery,InitLoadBalancer,InitRateLimiter,InitCircuitBreaker,InitServiceRegistry,InitHTTPServer,SetupRoutes,SetupMiddleware,SetupCORS,SetupAuth,SetupRateLimit,SetupMonitoring,RegisterGatewayRoutes,RegisterServiceDiscovery,SetupAPIForwarding,EnableDynamicRouting,StartHealthCheck,StartPerformanceMonitor processClass
+    class ValidateConfig,InitPerformanceMonitor,StartHTTPServer,StartServiceDiscovery decisionClass
+    class ConfigError,StartError,Exit errorClass
+    class GatewayReady,Running successClass
+    class Warning1,Warning2 warningClass
+```
+
+## 3. 服务注册与发现流程图
+
+```mermaid
+sequenceDiagram
+    participant Microservice as 微服务
+    participant Gateway as API网关
+    participant ServiceDiscovery as 服务发现
+    participant RouteManager as 路由管理器
+    participant LoadBalancer as 负载均衡器
+    participant HttpClient as HTTP客户端
+    
+    Note over Microservice, HttpClient: 服务注册流程
+    Microservice->>Gateway: POST /api/v1/services/register
+    Note right of Microservice: 注册数据包含:<br/>- service_name<br/>- host, port<br/>- api_endpoints<br/>- health_check_url<br/>- metadata
+    Gateway->>ServiceDiscovery: 验证注册数据
+    ServiceDiscovery->>ServiceDiscovery: 检查服务是否已存在
+    ServiceDiscovery->>LoadBalancer: 清除旧实例(如果存在)
+    ServiceDiscovery->>LoadBalancer: 添加新服务实例
+    ServiceDiscovery->>ServiceDiscovery: 更新健康状态
+    ServiceDiscovery-->>Gateway: 注册成功
+    
+    Note over Microservice, HttpClient: 动态路由创建流程
+    Gateway->>HttpClient: GET http://host:port/api/v1/service/endpoints
+    Note right of Gateway: 获取服务端点定义
+    HttpClient->>Microservice: 请求端点信息
+    Microservice-->>HttpClient: 返回端点列表
+    HttpClient-->>Gateway: 端点信息响应
+    Gateway->>RouteManager: 清理旧路由
+    Gateway->>RouteManager: 创建新路由
+    Note right of Gateway: 路径转换:<br/>/api/v1/users/{id} → /api/v1/users/*
+    RouteManager->>RouteManager: 验证路由配置
+    RouteManager->>RouteManager: 添加到路由表
+    RouteManager-->>Gateway: 路由创建完成
+    Gateway-->>Microservice: 注册成功响应
+    
+    Note over Microservice, HttpClient: 心跳监控流程
+    loop 每30秒
+        Microservice->>Gateway: POST /api/v1/services/heartbeat
+        Note right of Microservice: 心跳数据包含:<br/>- service_name<br/>- status: healthy<br/>- metadata(CPU, 内存等)
+        Gateway->>ServiceDiscovery: 更新心跳时间
+        ServiceDiscovery->>ServiceDiscovery: 更新健康分数
+        ServiceDiscovery->>LoadBalancer: 更新实例状态
+        Gateway-->>Microservice: 心跳确认
+    end
+    
+    Note over Microservice, HttpClient: 健康检查流程
+    loop 每60秒
+        Gateway->>HttpClient: GET http://host:port/health
+        HttpClient->>Microservice: 健康检查请求
+        Microservice-->>HttpClient: 健康状态响应
+        HttpClient-->>Gateway: 健康检查结果
+        Gateway->>ServiceDiscovery: 更新健康状态
+        ServiceDiscovery->>LoadBalancer: 更新实例可用性
+    end
+    
+    Note over Microservice, HttpClient: 服务注销流程
+    Microservice->>Gateway: DELETE /api/v1/services/deregister
+    Gateway->>RouteManager: 删除相关路由
+    Gateway->>LoadBalancer: 移除服务实例
+    Gateway->>ServiceDiscovery: 删除服务记录
+    Gateway-->>Microservice: 注销成功响应
+```
+
+## 4. API请求转发流程图
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant Gateway as API网关
+    participant AuthMiddleware as 认证中间件
+    participant RateLimiter as 限流器
+    participant CircuitBreaker as 熔断器
+    participant RouteManager as 路由管理器
+    participant LoadBalancer as 负载均衡器
+    participant Microservice as 目标微服务
+    participant Monitor as 性能监控
+    
+    Note over Client, Monitor: 正常请求处理流程
+    Client->>Gateway: HTTP Request (GET /api/v1/users/123)
+    Gateway->>AuthMiddleware: 检查认证
+    AuthMiddleware->>AuthMiddleware: 验证JWT Token
+    AuthMiddleware-->>Gateway: 认证通过
+    
+    Gateway->>RateLimiter: 检查限流
+    RateLimiter->>RateLimiter: 令牌桶算法检查
+    RateLimiter-->>Gateway: 限流通过
+    
+    Gateway->>CircuitBreaker: 检查熔断状态
+    CircuitBreaker->>CircuitBreaker: 检查失败率和响应时间
+    CircuitBreaker-->>Gateway: 熔断器关闭,允许请求
+    
+    Gateway->>RouteManager: 查找匹配路由
+    RouteManager->>RouteManager: 路径匹配算法
+    Note right of RouteManager: 匹配优先级:<br/>1. 精确匹配<br/>2. 参数匹配<br/>3. 通配符匹配
+    RouteManager-->>Gateway: 找到路由: user_service
+    
+    Gateway->>LoadBalancer: 选择服务实例
+    LoadBalancer->>LoadBalancer: 负载均衡算法(轮询)
+    LoadBalancer-->>Gateway: 选择实例: 0.0.0.0:8082
+    
+    Gateway->>Monitor: 记录请求开始
+    Gateway->>Microservice: HTTP转发 (GET http://0.0.0.0:8082/api/v1/users/123)
+    Microservice-->>Gateway: 服务响应 (200 OK)
+    Gateway->>Monitor: 记录请求完成
+    Gateway-->>Client: 返回响应
+    
+    Note over Client, Monitor: 认证失败流程
+    Client->>Gateway: HTTP Request (缺少Authorization头)
+    Gateway->>AuthMiddleware: 检查认证
+    AuthMiddleware->>AuthMiddleware: 验证失败
+    AuthMiddleware-->>Gateway: 认证失败
+    Gateway->>Monitor: 记录认证失败
+    Gateway-->>Client: 401 Unauthorized
+    
+    Note over Client, Monitor: 限流流程
+    Client->>Gateway: HTTP Request (超出限流)
+    Gateway->>AuthMiddleware: 检查认证
+    AuthMiddleware-->>Gateway: 认证通过
+    Gateway->>RateLimiter: 检查限流
+    RateLimiter->>RateLimiter: 令牌不足
+    RateLimiter-->>Gateway: 限流拦截
+    Gateway->>Monitor: 记录限流事件
+    Gateway-->>Client: 429 Too Many Requests
+    
+    Note over Client, Monitor: 熔断流程
+    Client->>Gateway: HTTP Request
+    Gateway->>AuthMiddleware: 检查认证
+    AuthMiddleware-->>Gateway: 认证通过
+    Gateway->>RateLimiter: 检查限流
+    RateLimiter-->>Gateway: 限流通过
+    Gateway->>CircuitBreaker: 检查熔断状态
+    CircuitBreaker->>CircuitBreaker: 熔断器开启
+    CircuitBreaker-->>Gateway: 拒绝请求
+    Gateway->>Monitor: 记录熔断事件
+    Gateway-->>Client: 503 Service Unavailable
+    
+    Note over Client, Monitor: 路由未找到流程
+    Client->>Gateway: HTTP Request (GET /api/v1/unknown)
+    Gateway->>AuthMiddleware: 检查认证
+    AuthMiddleware-->>Gateway: 认证通过
+    Gateway->>RateLimiter: 检查限流
+    RateLimiter-->>Gateway: 限流通过
+    Gateway->>RouteManager: 查找匹配路由
+    RouteManager->>RouteManager: 未找到匹配路由
+    RouteManager-->>Gateway: 路由不存在
+    Gateway->>Monitor: 记录404事件
+    Gateway-->>Client: 404 Route Not Found
+```
+
+## 5. 动态路由管理流程图
+
+```mermaid
+flowchart TD
+    subgraph ServiceRegistration[服务注册触发]
+        direction TB
+        ServiceRegister[微服务注册请求]
+        ValidateRegData[验证注册数据]
+        RegisterService[注册服务实例]
+    end
+    
+    subgraph EndpointDiscovery[端点发现流程]
+        direction TB
+        FetchEndpoints[获取服务端点]
+        ParseEndpoints[解析端点定义]
+        ValidateEndpoints[验证端点配置]
+    end
+    
+    subgraph RouteCreation[路由创建流程]
+        direction TB
+        ClearOldRoutes[清理旧路由]
+        CreateRoutes[创建新路由]
+        PathConversion[路径模式转换]
+        RouteValidation[路由配置验证]
+        AddToRouteTable[添加到路由表]
+    end
+    
+    Start([动态路由流程开始]) --> ServiceRegister
+    ServiceRegister --> ValidateRegData
+    ValidateRegData --> RegisterService
+    RegisterService --> FetchEndpoints
+    
+    FetchEndpoints --> ParseEndpoints
+    ParseEndpoints --> ValidateEndpoints
+    ValidateEndpoints --> ClearOldRoutes
+    
+    ClearOldRoutes --> CreateRoutes
+    CreateRoutes --> PathConversion
+    PathConversion --> RouteValidation
+    RouteValidation --> AddToRouteTable
+    
+    %% 路径转换详细流程
+    PathConversion --> StaticPath{静态路径?}
+    StaticPath -->|是| KeepOriginal[保持原路径]
+    StaticPath -->|否| HasParameters{包含参数?}
+    
+    HasParameters -->|是| ConvertParams[转换参数路径]
+    HasParameters -->|否| KeepOriginal
+    
+    ConvertParams --> ReplaceParams["替换{id} → *"]
+    ReplaceParams --> GeneratePattern[生成路由模式]
+    
+    KeepOriginal --> GeneratePattern
+    GeneratePattern --> RouteValidation
+    
+    %% 路由验证流程
+    RouteValidation --> ValidPath{路径有效?}
+    ValidPath -->|否| ValidationError[验证失败]
+    ValidPath -->|是| ValidMethod{方法有效?}
+    ValidMethod -->|否| ValidationError
+    ValidMethod -->|是| ValidService{服务有效?}
+    ValidService -->|否| ValidationError
+    ValidService -->|是| AddToRouteTable
+    
+    ValidationError --> LogError[记录错误日志]
+    LogError --> Continue[继续处理其他端点]
+    Continue --> CreateRoutes
+    
+    AddToRouteTable --> UpdateCache[更新路由缓存]
+    UpdateCache --> NotifyLoadBalancer[通知负载均衡器]
+    NotifyLoadBalancer --> RoutingComplete[路由创建完成]
+    
+    %% 完成后的操作
+    RoutingComplete --> LogSuccess[记录成功日志]
+    LogSuccess --> UpdateMetrics[更新路由指标]
+    UpdateMetrics --> End([流程结束])
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef conversionClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class ServiceRegister,ValidateRegData,RegisterService,FetchEndpoints,ParseEndpoints,ValidateEndpoints,ClearOldRoutes,CreateRoutes,AddToRouteTable,UpdateCache,NotifyLoadBalancer,LogSuccess,UpdateMetrics processClass
+    class StaticPath,HasParameters,ValidPath,ValidMethod,ValidService decisionClass
+    class ValidationError,LogError errorClass
+    class RoutingComplete,End successClass
+    class PathConversion,ConvertParams,ReplaceParams,GeneratePattern conversionClass
+```
+
+## 6. 负载均衡与熔断策略图
+
+```mermaid
+flowchart TD
+    subgraph LoadBalancingStrategy[负载均衡策略]
+        direction TB
+        RequestArrival[请求到达]
+        SelectStrategy{选择策略}
+        RoundRobin[轮询策略]
+        WeightedRoundRobin[权重轮询]
+        LeastConnections[最少连接]
+        HealthyInstances[获取健康实例]
+        SelectInstance[选择实例]
+    end
+    
+    subgraph CircuitBreakerLogic[熔断器逻辑]
+        direction TB
+        CheckState{检查熔断状态}
+        ClosedState[关闭状态]
+        OpenState[开启状态]
+        HalfOpenState[半开状态]
+        MonitorMetrics[监控指标]
+        EvaluateHealth[评估健康度]
+        StateTransition[状态转换]
+    end
+    
+    subgraph HealthMonitoring[健康监控]
+        direction TB
+        ActiveCheck[主动健康检查]
+        PassiveCheck[被动健康检查]
+        HealthScore[健康分数计算]
+        InstanceStatus[实例状态更新]
+    end
+    
+    Start([请求处理开始]) --> RequestArrival
+    RequestArrival --> CheckState
+    
+    %% 熔断器状态检查
+    CheckState --> ClosedState
+    CheckState --> OpenState
+    CheckState --> HalfOpenState
+    
+    %% 关闭状态 - 正常处理
+    ClosedState --> SelectStrategy
+    SelectStrategy --> RoundRobin
+    SelectStrategy --> WeightedRoundRobin
+    SelectStrategy --> LeastConnections
+    
+    RoundRobin --> HealthyInstances
+    WeightedRoundRobin --> HealthyInstances
+    LeastConnections --> HealthyInstances
+    HealthyInstances --> SelectInstance
+    
+    %% 开启状态 - 直接拒绝
+    OpenState --> RejectRequest[拒绝请求]
+    RejectRequest --> ReturnError[返回503错误]
+    
+    %% 半开状态 - 限制性转发
+    HalfOpenState --> LimitedForward[限制性转发]
+    LimitedForward --> TestRequest[测试请求]
+    
+    %% 请求执行和监控
+    SelectInstance --> ExecuteRequest[执行请求]
+    TestRequest --> ExecuteRequest
+    ExecuteRequest --> MonitorMetrics
+    
+    MonitorMetrics --> RecordResponse[记录响应]
+    RecordResponse --> UpdateCounters[更新计数器]
+    UpdateCounters --> EvaluateHealth
+    
+    %% 健康评估和状态转换
+    EvaluateHealth --> FailureRate{失败率检查}
+    FailureRate -->|高| TriggerOpen[触发开启]
+    FailureRate -->|正常| MaintainClosed[保持关闭]
+    
+    EvaluateHealth --> ResponseTime{响应时间检查}
+    ResponseTime -->|慢| IncrementSlow[增加慢调用计数]
+    ResponseTime -->|正常| ResetCounters[重置计数器]
+    
+    TriggerOpen --> StateTransition
+    MaintainClosed --> StateTransition
+    IncrementSlow --> StateTransition
+    ResetCounters --> StateTransition
+    
+    %% 健康监控并行流程
+    Start --> ActiveCheck
+    ActiveCheck --> HealthCheck[HTTP健康检查]
+    HealthCheck --> HealthScore
+    
+    ExecuteRequest --> PassiveCheck
+    PassiveCheck --> ResponseAnalysis[响应分析]
+    ResponseAnalysis --> HealthScore
+    
+    HealthScore --> InstanceStatus
+    InstanceStatus --> UpdateLoadBalancer[更新负载均衡器]
+    
+    %% 状态转换逻辑
+    StateTransition --> NewState{新状态}
+    NewState -->|关闭| ClosedState
+    NewState -->|开启| OpenState
+    NewState -->|半开| HalfOpenState
+    
+    %% 完成流程
+    UpdateLoadBalancer --> End([请求处理完成])
+    ReturnError --> End
+    StateTransition --> End
+    
+    %% 定时任务
+    PeriodicCheck[定时检查] --> HealthScore
+    PeriodicCheck --> EvaluateHealth
+    
+    %% 样式
+    classDef strategyClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef circuitClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef healthClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    
+    class LoadBalancingStrategy strategyClass
+    class CircuitBreakerLogic circuitClass
+    class HealthMonitoring healthClass
+    class CheckState,SelectStrategy,FailureRate,ResponseTime,NewState decisionClass
+    class RejectRequest,ReturnError,TriggerOpen errorClass
+```
+
+## 7. 中间件处理流程图
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant HTTPServer as HTTP服务器
+    participant CORSMiddleware as CORS中间件
+    participant AuthMiddleware as 认证中间件
+    participant RateLimitMiddleware as 限流中间件
+    participant MonitoringMiddleware as 监控中间件
+    participant RequestHandler as 请求处理器
+    participant ResponseHandler as 响应处理器
+    
+    Note over Client, ResponseHandler: 中间件调用链流程
+    Client->>HTTPServer: HTTP请求
+    HTTPServer->>CORSMiddleware: 第一层中间件
+    
+    Note over CORSMiddleware: CORS处理
+    CORSMiddleware->>CORSMiddleware: 检查Origin头
+    CORSMiddleware->>CORSMiddleware: 验证允许的来源
+    CORSMiddleware->>CORSMiddleware: 设置CORS响应头
+    CORSMiddleware->>AuthMiddleware: 继续到下一层
+    
+    Note over AuthMiddleware: 认证处理
+    AuthMiddleware->>AuthMiddleware: 检查公开路径
+    alt 公开路径
+        AuthMiddleware->>RateLimitMiddleware: 跳过认证
+    else 受保护路径
+        AuthMiddleware->>AuthMiddleware: 提取Authorization头
+        AuthMiddleware->>AuthMiddleware: 验证JWT Token
+        alt 认证失败
+            AuthMiddleware-->>Client: 401 Unauthorized
+        else 认证成功
+            AuthMiddleware->>RateLimitMiddleware: 继续处理
+        end
+    end
+    
+    Note over RateLimitMiddleware: 限流处理
+    RateLimitMiddleware->>RateLimitMiddleware: 获取客户端标识
+    RateLimitMiddleware->>RateLimitMiddleware: 检查令牌桶
+    alt 限流触发
+        RateLimitMiddleware-->>Client: 429 Too Many Requests
+    else 限流通过
+        RateLimitMiddleware->>MonitoringMiddleware: 继续处理
+    end
+    
+    Note over MonitoringMiddleware: 监控处理
+    MonitoringMiddleware->>MonitoringMiddleware: 记录请求开始时间
+    MonitoringMiddleware->>MonitoringMiddleware: 生成请求ID
+    MonitoringMiddleware->>MonitoringMiddleware: 记录请求指标
+    MonitoringMiddleware->>RequestHandler: 转发到业务处理
+    
+    Note over RequestHandler: 业务处理
+    RequestHandler->>RequestHandler: 路由匹配
+    RequestHandler->>RequestHandler: 服务发现
+    RequestHandler->>RequestHandler: 负载均衡
+    RequestHandler->>RequestHandler: 请求转发
+    RequestHandler->>ResponseHandler: 处理响应
+    
+    Note over ResponseHandler: 响应处理
+    ResponseHandler->>ResponseHandler: 构建响应
+    ResponseHandler->>MonitoringMiddleware: 返回响应
+    
+    Note over MonitoringMiddleware: 监控收尾
+    MonitoringMiddleware->>MonitoringMiddleware: 计算响应时间
+    MonitoringMiddleware->>MonitoringMiddleware: 记录响应指标
+    MonitoringMiddleware->>MonitoringMiddleware: 更新统计数据
+    MonitoringMiddleware->>RateLimitMiddleware: 响应返回
+    
+    Note over RateLimitMiddleware: 限流收尾
+    RateLimitMiddleware->>RateLimitMiddleware: 更新令牌桶状态
+    RateLimitMiddleware->>AuthMiddleware: 响应返回
+    
+    Note over AuthMiddleware: 认证收尾
+    AuthMiddleware->>AuthMiddleware: 清理认证上下文
+    AuthMiddleware->>CORSMiddleware: 响应返回
+    
+    Note over CORSMiddleware: CORS收尾
+    CORSMiddleware->>CORSMiddleware: 确保CORS头完整
+    CORSMiddleware->>HTTPServer: 响应返回
+    
+    HTTPServer-->>Client: 最终HTTP响应
+    
+    Note over Client, ResponseHandler: 错误处理流程
+    alt 中间件处理异常
+        AuthMiddleware->>AuthMiddleware: 捕获异常
+        AuthMiddleware->>AuthMiddleware: 记录错误日志
+        AuthMiddleware->>MonitoringMiddleware: 通知监控
+        MonitoringMiddleware->>MonitoringMiddleware: 记录异常指标
+        AuthMiddleware-->>Client: 错误响应
+    end
+```
+
+## 8. 服务监控与诊断流程图
+
+```mermaid
+flowchart TD
+    subgraph MonitoringSystem[监控系统]
+        direction TB
+        PerformanceMonitor[性能监控器]
+        HealthChecker[健康检查器]
+        MetricsCollector[指标收集器]
+        AlertManager[告警管理器]
+    end
+    
+    subgraph DataCollection[数据收集层]
+        direction TB
+        RequestMetrics[请求指标]
+        ResponseMetrics[响应指标]
+        ServiceMetrics[服务指标]
+        SystemMetrics[系统指标]
+    end
+    
+    subgraph DiagnosticAPIs[诊断API层]
+        direction TB
+        HealthAPI[健康检查API]
+        MetricsAPI[指标查询API]
+        StatsAPI[统计信息API]
+        ServiceStatsAPI[服务统计API]
+    end
+    
+    subgraph Storage[存储层]
+        direction TB
+        MemoryCache[内存缓存]
+        MetricsStore[指标存储]
+        LogStore[日志存储]
+    end
+    
+    Start([监控流程开始]) --> PerformanceMonitor
+    
+    %% 性能监控流程
+    PerformanceMonitor --> CollectCPU[收集CPU使用率]
+    PerformanceMonitor --> CollectMemory[收集内存使用率]
+    PerformanceMonitor --> CollectNetwork[收集网络指标]
+    PerformanceMonitor --> CollectDisk[收集磁盘IO]
+    
+    CollectCPU --> SystemMetrics
+    CollectMemory --> SystemMetrics
+    CollectNetwork --> SystemMetrics
+    CollectDisk --> SystemMetrics
+    
+    %% 健康检查流程
+    HealthChecker --> ServiceHealthCheck[服务健康检查]
+    ServiceHealthCheck --> CheckHTTPServer[检查HTTP服务器]
+    CheckHTTPServer --> CheckRouteManager[检查路由管理器]
+    CheckRouteManager --> CheckLoadBalancer[检查负载均衡器]
+    CheckLoadBalancer --> CheckCircuitBreakers[检查熔断器]
+    CheckCircuitBreakers --> CalculateHealthScore[计算健康分数]
+    
+    CalculateHealthScore --> ServiceMetrics
+    
+    %% 请求指标收集
+    RequestProcessing[请求处理] --> RecordStart[记录开始时间]
+    RecordStart --> RecordMethod[记录请求方法]
+    RecordMethod --> RecordPath[记录请求路径]
+    RecordPath --> RecordHeaders[记录请求头]
+    RecordHeaders --> RequestMetrics
+    
+    %% 响应指标收集
+    ResponseProcessing[响应处理] --> RecordStatus[记录状态码]
+    RecordStatus --> RecordResponseTime[记录响应时间]
+    RecordResponseTime --> RecordSize[记录响应大小]
+    RecordSize --> RecordErrors[记录错误信息]
+    RecordErrors --> ResponseMetrics
+    
+    %% 指标聚合
+    RequestMetrics --> MetricsCollector
+    ResponseMetrics --> MetricsCollector
+    ServiceMetrics --> MetricsCollector
+    SystemMetrics --> MetricsCollector
+    
+    MetricsCollector --> AggregateData[聚合数据]
+    AggregateData --> CalculateRates[计算速率]
+    CalculateRates --> CalculatePercentiles[计算百分位数]
+    CalculatePercentiles --> GenerateStats[生成统计信息]
+    
+    %% 存储数据
+    GenerateStats --> MemoryCache
+    GenerateStats --> MetricsStore
+    GenerateStats --> LogStore
+    
+    %% API服务
+    MemoryCache --> HealthAPI
+    MetricsStore --> MetricsAPI
+    MetricsStore --> StatsAPI
+    MetricsStore --> ServiceStatsAPI
+    
+    %% 告警检查
+    GenerateStats --> AlertManager
+    AlertManager --> ThresholdCheck{阈值检查}
+    ThresholdCheck -->|超过阈值| TriggerAlert[触发告警]
+    ThresholdCheck -->|正常| ContinueMonitoring[继续监控]
+    
+    TriggerAlert --> SendNotification[发送通知]
+    SendNotification --> LogAlert[记录告警]
+    LogAlert --> ContinueMonitoring
+    
+    %% 定时任务
+    PeriodicTasks[定时任务] --> CleanOldData[清理旧数据]
+    PeriodicTasks --> UpdateAggregates[更新聚合数据]
+    PeriodicTasks --> HealthCheckRoutine[健康检查例程]
+    
+    CleanOldData --> MetricsStore
+    UpdateAggregates --> MetricsCollector
+    HealthCheckRoutine --> HealthChecker
+    
+    %% API查询流程
+    ClientQuery[客户端查询] --> APIRouter{API路由}
+    APIRouter --> HealthAPI
+    APIRouter --> MetricsAPI
+    APIRouter --> StatsAPI
+    APIRouter --> ServiceStatsAPI
+    
+    HealthAPI --> QueryHealth[查询健康状态]
+    MetricsAPI --> QueryMetrics[查询性能指标]
+    StatsAPI --> QueryStats[查询统计信息]
+    ServiceStatsAPI --> QueryServiceStats[查询服务统计]
+    
+    QueryHealth --> MemoryCache
+    QueryMetrics --> MetricsStore
+    QueryStats --> MetricsStore
+    QueryServiceStats --> MetricsStore
+    
+    MemoryCache --> FormatResponse[格式化响应]
+    MetricsStore --> FormatResponse
+    FormatResponse --> ReturnResponse[返回响应]
+    
+    ReturnResponse --> End([监控流程结束])
+    ContinueMonitoring --> PerformanceMonitor
+    
+    %% 样式
+    classDef monitorClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef dataClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef apiClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef storageClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef alertClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    
+    class MonitoringSystem monitorClass
+    class DataCollection dataClass
+    class DiagnosticAPIs apiClass
+    class Storage storageClass
+    class AlertManager,TriggerAlert,SendNotification alertClass
+```
+
+## 9. 错误处理与容错机制图
+
+```mermaid
+flowchart TD
+    subgraph ErrorTypes[错误类型]
+        direction TB
+        ClientError[客户端错误<br/>4xx]
+        ServerError[服务端错误<br/>5xx]
+        NetworkError[网络错误]
+        ServiceError[服务异常]
+        ConfigError[配置错误]
+    end
+    
+    subgraph FaultTolerance[容错机制]
+        direction TB
+        CircuitBreaker[熔断器]
+        Retry[重试机制]
+        Fallback[降级策略]
+        Timeout[超时控制]
+        BulkHead[舱壁隔离]
+    end
+    
+    subgraph RecoveryStrategy[恢复策略]
+        direction TB
+        AutoRecovery[自动恢复]
+        ManualIntervention[人工干预]
+        ServiceRestart[服务重启]
+        ConfigReload[配置重载]
+    end
+    
+    ErrorOccurred([错误发生]) --> ClassifyError{错误分类}
+    
+    %% 错误分类
+    ClassifyError --> ClientError
+    ClassifyError --> ServerError
+    ClassifyError --> NetworkError
+    ClassifyError --> ServiceError
+    ClassifyError --> ConfigError
+    
+    %% 客户端错误处理
+    ClientError --> LogClientError[记录客户端错误]
+    LogClientError --> Return4xx[返回4xx响应]
+    Return4xx --> UpdateClientErrorStats[更新客户端错误统计]
+    
+    %% 服务端错误处理
+    ServerError --> LogServerError[记录服务端错误]
+    LogServerError --> CheckCircuitBreaker{检查熔断器}
+    CheckCircuitBreaker -->|开启| ApplyFallback[应用降级策略]
+    CheckCircuitBreaker -->|关闭| TriggerCircuitBreaker[触发熔断器]
+    
+    %% 网络错误处理
+    NetworkError --> CheckRetryPolicy{检查重试策略}
+    CheckRetryPolicy -->|可重试| InitiateRetry[启动重试]
+    CheckRetryPolicy -->|不可重试| ApplyFallback
+    
+    InitiateRetry --> RetryAttempt[重试尝试]
+    RetryAttempt --> RetrySuccess{重试成功?}
+    RetrySuccess -->|成功| RecordSuccess[记录成功]
+    RetrySuccess -->|失败| CheckMaxRetries{达到最大重试?}
+    CheckMaxRetries -->|是| ApplyFallback
+    CheckMaxRetries -->|否| DelayRetry[延迟重试]
+    DelayRetry --> RetryAttempt
+    
+    %% 服务异常处理
+    ServiceError --> AnalyzeError[分析错误类型]
+    AnalyzeError --> ServiceDown{服务宕机?}
+    ServiceDown -->|是| MarkServiceDown[标记服务不可用]
+    ServiceDown -->|否| ServiceSlow{服务响应慢?}
+    ServiceSlow -->|是| MarkServiceSlow[标记服务缓慢]
+    ServiceSlow -->|否| LogUnknownError[记录未知错误]
+    
+    MarkServiceDown --> RemoveFromLB[从负载均衡器移除]
+    MarkServiceSlow --> ReduceWeight[降低权重]
+    
+    %% 配置错误处理
+    ConfigError --> ValidateConfig[验证配置]
+    ValidateConfig --> ConfigInvalid{配置无效?}
+    ConfigInvalid -->|是| UseDefaultConfig[使用默认配置]
+    ConfigInvalid -->|否| ReloadConfig[重新加载配置]
+    
+    %% 容错机制应用
+    TriggerCircuitBreaker --> CircuitBreaker
+    CircuitBreaker --> SetCircuitOpen[设置熔断器开启]
+    SetCircuitOpen --> StartRecoveryTimer[启动恢复定时器]
+    
+    ApplyFallback --> Fallback
+    Fallback --> ReturnCachedResponse[返回缓存响应]
+    Fallback --> ReturnDefaultResponse[返回默认响应]
+    Fallback --> RedirectToBackup[重定向到备用服务]
+    
+    %% 超时控制
+    RequestTimeout[请求超时] --> Timeout
+    Timeout --> CancelRequest[取消请求]
+    CancelRequest --> LogTimeout[记录超时]
+    LogTimeout --> UpdateTimeoutStats[更新超时统计]
+    
+    %% 舱壁隔离
+    ResourceExhaustion[资源耗尽] --> BulkHead
+    BulkHead --> IsolateFailure[隔离故障]
+    IsolateFailure --> PreventCascade[防止级联失败]
+    
+    %% 恢复策略
+    StartRecoveryTimer --> CheckRecoveryCondition{检查恢复条件}
+    CheckRecoveryCondition -->|满足| AutoRecovery
+    CheckRecoveryCondition -->|不满足| WaitForRecovery[等待恢复]
+    
+    AutoRecovery --> TestService[测试服务]
+    TestService --> ServiceHealthy{服务健康?}
+    ServiceHealthy -->|是| RestoreService[恢复服务]
+    ServiceHealthy -->|否| ContinueCircuitBreaker[继续熔断]
+    
+    RestoreService --> AddToLB[添加到负载均衡器]
+    RestoreService --> ResetCircuitBreaker[重置熔断器]
+    RestoreService --> LogRecovery[记录恢复]
+    
+    %% 人工干预
+    SevereError[严重错误] --> ManualIntervention
+    ManualIntervention --> NotifyOps[通知运维]
+    NotifyOps --> WaitForFix[等待修复]
+    
+    %% 监控和告警
+    LogClientError --> UpdateMonitoring[更新监控指标]
+    LogServerError --> UpdateMonitoring
+    LogTimeout --> UpdateMonitoring
+    LogUnknownError --> UpdateMonitoring
+    LogRecovery --> UpdateMonitoring
+    
+    UpdateMonitoring --> CheckAlertThreshold{检查告警阈值}
+    CheckAlertThreshold -->|超过| SendAlert[发送告警]
+    CheckAlertThreshold -->|正常| ContinueMonitoring[继续监控]
+    
+    SendAlert --> AlertManagement[告警管理]
+    ContinueMonitoring --> End([错误处理完成])
+    AlertManagement --> End
+    
+    %% 完成路径
+    UpdateClientErrorStats --> End
+    RecordSuccess --> End
+    ReturnCachedResponse --> End
+    ReturnDefaultResponse --> End
+    RedirectToBackup --> End
+    LogRecovery --> End
+    ContinueCircuitBreaker --> WaitForRecovery
+    WaitForRecovery --> CheckRecoveryCondition
+    
+    %% 样式
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef faultClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef recoveryClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef actionClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class ErrorTypes errorClass
+    class FaultTolerance faultClass
+    class RecoveryStrategy recoveryClass
+    class ClassifyError,CheckCircuitBreaker,CheckRetryPolicy,RetrySuccess,CheckMaxRetries,ServiceDown,ServiceSlow,ConfigInvalid,CheckRecoveryCondition,ServiceHealthy,CheckAlertThreshold decisionClass
+    class UpdateMonitoring,SendAlert,LogRecovery,RestoreService actionClass
+```
+
+## 10. 网关安全架构图
+
+```mermaid
+flowchart TD
+    subgraph SecurityLayers[安全层次架构]
+        direction TB
+        TransportSecurity[传输层安全<br/>HTTPS/TLS]
+        AuthenticationLayer[身份认证层<br/>JWT验证]
+        AuthorizationLayer[授权控制层<br/>路径权限]
+        RateLimitingLayer[访问控制层<br/>限流防护]
+        CircuitBreakerLayer[故障隔离层<br/>熔断保护]
+    end
+    
+    subgraph SecurityMechanisms[安全机制]
+        direction TB
+        JWTValidation[JWT令牌验证]
+        CORSProtection[CORS跨域保护]
+        CSRFProtection[CSRF攻击防护]
+        InputValidation[输入验证]
+        OutputSanitization[输出清理]
+    end
+    
+    subgraph ThreatProtection[威胁防护]
+        direction TB
+        DDoSProtection[DDoS攻击防护]
+        BruteForceProtection[暴力破解防护]
+        InjectionProtection[注入攻击防护]
+        XSSProtection[XSS攻击防护]
+        DataLeakProtection[数据泄露防护]
+    end
+    
+    subgraph SecurityMonitoring[安全监控]
+        direction TB
+        AccessLogging[访问日志记录]
+        AnomalyDetection[异常行为检测]
+        SecurityAlerts[安全告警]
+        AuditTrail[审计追踪]
+    end
+    
+    %% 安全流程
+    IncomingRequest[incoming请求] --> TransportSecurity
+    TransportSecurity --> AuthenticationLayer
+    AuthenticationLayer --> AuthorizationLayer
+    AuthorizationLayer --> RateLimitingLayer
+    RateLimitingLayer --> CircuitBreakerLayer
+    CircuitBreakerLayer --> RequestProcessing[请求处理]
+    
+    %% 认证机制
+    AuthenticationLayer --> JWTValidation
+    JWTValidation --> TokenExtraction[提取令牌]
+    TokenExtraction --> TokenVerification[验证令牌]
+    TokenVerification --> ClaimsValidation[验证声明]
+    
+    %% CORS保护
+    AuthenticationLayer --> CORSProtection
+    CORSProtection --> OriginCheck[来源检查]
+    OriginCheck --> AllowedMethods[允许方法检查]
+    AllowedMethods --> SetCORSHeaders[设置CORS头]
+    
+    %% 输入验证
+    RequestProcessing --> InputValidation
+    InputValidation --> ParameterValidation[参数验证]
+    ParameterValidation --> HeaderValidation[头部验证]
+    HeaderValidation --> BodyValidation[请求体验证]
+    
+    %% 威胁防护机制
+    RateLimitingLayer --> DDoSProtection
+    DDoSProtection --> RateAnalysis[速率分析]
+    RateAnalysis --> BehaviorAnalysis[行为分析]
+    BehaviorAnalysis --> ThreatClassification[威胁分类]
+    
+    InputValidation --> InjectionProtection
+    InjectionProtection --> SQLInjectionCheck[SQL注入检查]
+    SQLInjectionCheck --> XSSCheck[XSS检查]
+    XSSCheck --> CommandInjectionCheck[命令注入检查]
+    
+    %% 暴力破解防护
+    AuthenticationLayer --> BruteForceProtection
+    BruteForceProtection --> LoginAttemptTracking[登录尝试追踪]
+    LoginAttemptTracking --> IPBlacklisting[IP黑名单]
+    IPBlacklisting --> CaptchaChallenge[验证码挑战]
+    
+    %% 输出保护
+    RequestProcessing --> OutputSanitization
+    OutputSanitization --> ResponseFiltering[响应过滤]
+    ResponseFiltering --> SensitiveDataMasking[敏感数据脱敏]
+    SensitiveDataMasking --> SecureHeaders[安全头设置]
+    
+    %% 安全监控
+    TransportSecurity --> AccessLogging
+    AuthenticationLayer --> AccessLogging
+    RateLimitingLayer --> AccessLogging
+    
+    AccessLogging --> LogAnalysis[日志分析]
+    LogAnalysis --> AnomalyDetection
+    AnomalyDetection --> ThreatDetection[威胁检测]
+    ThreatDetection --> SecurityAlerts
+    
+    SecurityAlerts --> IncidentResponse[事件响应]
+    IncidentResponse --> AutoBlocking[自动阻断]
+    IncidentResponse --> ManualReview[人工审查]
+    
+    %% 审计追踪
+    AuthenticationLayer --> AuditTrail
+    AuthorizationLayer --> AuditTrail
+    RequestProcessing --> AuditTrail
+    AuditTrail --> ComplianceReporting[合规报告]
+    
+    %% 数据保护
+    RequestProcessing --> DataLeakProtection
+    DataLeakProtection --> DataClassification[数据分类]
+    DataClassification --> EncryptionInTransit[传输加密]
+    EncryptionInTransit --> EncryptionAtRest[存储加密]
+    
+    %% 配置安全
+    SecurityConfiguration[安全配置] --> SecretManagement[密钥管理]
+    SecretManagement --> ConfigEncryption[配置加密]
+    ConfigEncryption --> AccessControl[访问控制]
+    
+    %% 安全更新
+    SecurityUpdates[安全更新] --> VulnerabilityScanning[漏洞扫描]
+    VulnerabilityScanning --> PatchManagement[补丁管理]
+    PatchManagement --> SecurityTesting[安全测试]
+    
+    %% 完成流程
+    RequestProcessing --> SecureResponse[安全响应]
+    SecureResponse --> ResponseLogging[响应日志]
+    ResponseLogging --> SecurityMetrics[安全指标]
+    SecurityMetrics --> End([安全处理完成])
+    
+    %% 样式
+    classDef securityClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef protectionClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef monitoringClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef threatClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef processClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    
+    class SecurityLayers securityClass
+    class SecurityMechanisms protectionClass
+    class SecurityMonitoring monitoringClass
+    class ThreatProtection threatClass
+    class TokenExtraction,ParameterValidation,RateAnalysis,LogAnalysis processClass
+```
+
+

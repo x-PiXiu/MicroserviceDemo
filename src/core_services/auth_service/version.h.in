@@ -1,0 +1,91 @@
+/**
+ * @file version.h
+ * @brief 认证服务版本信息 - 自动生成文件
+ * @details 此文件由CMake从version.h.in模板自动生成，包含版本信息
+ * @author AI Assistant
+ * @date 2025-09-19
+ * @version 2.0.0
+ */
+
+#pragma once
+
+#include <string>
+
+namespace core_services {
+namespace auth_service {
+
+/**
+ * @brief 认证服务版本信息类
+ */
+class Version {
+public:
+    // 版本号常量
+    static constexpr const char* MAJOR = "@AUTH_SERVICE_VERSION_MAJOR@";
+    static constexpr const char* MINOR = "@AUTH_SERVICE_VERSION_MINOR@";
+    static constexpr const char* PATCH = "@AUTH_SERVICE_VERSION_PATCH@";
+    static constexpr const char* VERSION_STRING = "@AUTH_SERVICE_VERSION@";
+    static constexpr const char* BUILD_DATE = "@AUTH_SERVICE_BUILD_DATE@";
+    static constexpr const char* BUILD_TIME = "@AUTH_SERVICE_BUILD_TIME@";
+    static constexpr const char* GIT_COMMIT = "@AUTH_SERVICE_GIT_COMMIT@";
+    static constexpr const char* GIT_BRANCH = "@AUTH_SERVICE_GIT_BRANCH@";
+    static constexpr const char* CMAKE_BUILD_TYPE = "@CMAKE_BUILD_TYPE@";
+    static constexpr const char* COMPILER_ID = "@CMAKE_CXX_COMPILER_ID@";
+    static constexpr const char* COMPILER_VERSION = "@CMAKE_CXX_COMPILER_VERSION@";
+    static constexpr const char* ARCHITECTURE = "@AUTH_SERVICE_ARCHITECTURE@";
+    
+    /**
+     * @brief 获取完整版本字符串
+     * @return 版本字符串
+     */
+    static std::string getFullVersionString() {
+        return std::string(VERSION_STRING) + " (built on " + BUILD_DATE + " " + BUILD_TIME + ")";
+    }
+    
+    /**
+     * @brief 获取构建信息
+     * @return 构建信息字符串
+     */
+    static std::string getBuildInfo() {
+        return std::string("Built with ") + COMPILER_ID + " " + COMPILER_VERSION + 
+               " in " + CMAKE_BUILD_TYPE + " mode for " + ARCHITECTURE;
+    }
+    
+    /**
+     * @brief 获取Git信息
+     * @return Git信息字符串
+     */
+    static std::string getGitInfo() {
+        return std::string("Git: ") + GIT_BRANCH + "@" + GIT_COMMIT;
+    }
+    
+    /**
+     * @brief 打印版本信息到标准输出
+     */
+    static void printVersionInfo();
+    
+    /**
+     * @brief 检查版本兼容性
+     * @param required_version 需要的版本
+     * @return 是否兼容
+     */
+    static bool isCompatibleWith(const std::string& required_version);
+};
+
+/**
+ * @brief 版本信息宏定义
+ */
+#define AUTH_SERVICE_VERSION_MAJOR @AUTH_SERVICE_VERSION_MAJOR@
+#define AUTH_SERVICE_VERSION_MINOR @AUTH_SERVICE_VERSION_MINOR@
+#define AUTH_SERVICE_VERSION_PATCH @AUTH_SERVICE_VERSION_PATCH@
+#define AUTH_SERVICE_VERSION "@AUTH_SERVICE_VERSION@"
+#define AUTH_SERVICE_BUILD_DATE "@AUTH_SERVICE_BUILD_DATE@"
+#define AUTH_SERVICE_BUILD_TIME "@AUTH_SERVICE_BUILD_TIME@"
+#define AUTH_SERVICE_GIT_COMMIT "@AUTH_SERVICE_GIT_COMMIT@"
+#define AUTH_SERVICE_GIT_BRANCH "@AUTH_SERVICE_GIT_BRANCH@"
+
+} // namespace auth_service
+} // namespace core_services
+
+
+
+

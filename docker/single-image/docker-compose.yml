@@ -1,0 +1,333 @@
+# =============================================================================
+# 游戏微服务 - 单镜像版本 Docker Compose
+#
+# 特点:
+# - 使用单个镜像启动多个容器
+# - 容器间共享网络
+# - 适合开发环境和快速部署
+# - 避免 BuildKit 缓存问题
+# - 支持外部 MySQL/Redis
+#
+# 使用方法:
+#   # 使用内部数据库和 Redis（默认）
+#   docker-compose --env-file docker/.env -f docker/single-image/docker-compose.yml --profile internal-db --profile internal-redis up -d
+#
+#   # 使用外部数据库和 Redis
+#   1. 修改 docker/.env 文件
+#   2. 设置 USE_EXTERNAL_DB=true, MYSQL_HOST=...
+#   3. 设置 USE_EXTERNAL_REDIS=true, REDIS_HOST=...
+#   docker-compose --env-file docker/.env -f docker/single-image/docker-compose.yml up -d
+#
+#   # 构建镜像
+#   docker-compose -f docker/single-image/docker-compose.yml build
+#
+#   # 查看日志
+#   docker-compose -f docker/single-image/docker-compose.yml logs -f
+#
+#   # 停止服务
+#   docker-compose -f docker/single-image/docker-compose.yml down
+# =============================================================================
+
+networks:
+  game-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  mysql-data:
+    driver: local
+  redis-data:
+    driver: local
+  logs-data:
+    driver: local
+
+services:
+  # MySQL 数据库（内部模式）
+  mysql:
+    image: mysql:8.0
+    container_name: game-mysql
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-game_platform}
+    ports:
+      - "${MYSQL_PORT:-13306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ../shared/init/mysql:/docker-entrypoint-initdb.d:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=mysql_native_password
+      - --max_connections=500
+    networks:
+      game-network:
+        aliases:
+          - mysql
+          - db
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    profiles:
+      - internal-db
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # Redis 缓存（内部模式）
+  redis:
+    image: redis:7-alpine
+    container_name: game-redis
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "${REDIS_PORT:-16379}:6379"
+    volumes:
+      - redis-data:/data
+      - ../shared/config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    networks:
+      game-network:
+        aliases:
+          - redis
+          - cache
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - internal-redis
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+
+  # 服务注册中心
+  service_registry:
+    image: game-microservices:${VERSION:-latest}
+    container_name: game-service-registry
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVICE_NAME: service_registry
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_EXTERNAL_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    ports:
+      - "${SERVICE_REGISTRY_PORT:-8090}:8090"
+    volumes:
+      - logs-data:/app/logs
+      - ../shared/config/services/service_registry.yml:/app/config/service_registry.yml:ro
+    networks:
+      game-network:
+        aliases:
+          - service-registry
+          - registry
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8090/api/v1/services/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+
+  # 用户服务
+  user_service:
+    image: game-microservices:${VERSION:-latest}
+    container_name: game-user-service
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVICE_NAME: user_service
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-game2025secret}
+      SERVICE_REGISTRY_HOST: ${SERVICE_REGISTRY_HOST:-service-registry}
+      SERVICE_REGISTRY_PORT: ${SERVICE_REGISTRY_INTERNAL_PORT:-8090}
+    ports:
+      - "${USER_SERVICE_PORT:-8082}:8082"
+    volumes:
+      - logs-data:/app/logs
+      - ../shared/config/services/user_service.yml:/app/config/user_service.yml:ro
+    networks:
+      game-network:
+        aliases:
+          - user-service
+    depends_on:
+      service_registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/api/v1/user/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # 认证服务
+  auth_service:
+    image: game-microservices:${VERSION:-latest}
+    container_name: game-auth-service
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVICE_NAME: auth_service
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-game2025secret}
+      USER_SERVICE_URL: http://${USER_SERVICE_HOST:-user-service}:${USER_SERVICE_INTERNAL_PORT:-8082}
+      SERVICE_REGISTRY_HOST: ${SERVICE_REGISTRY_HOST:-service-registry}
+      SERVICE_REGISTRY_PORT: ${SERVICE_REGISTRY_INTERNAL_PORT:-8090}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-game_microservices_jwt_secret_key_2025_very_secure}
+    ports:
+      - "${AUTH_SERVICE_PORT:-8083}:8083"
+    volumes:
+      - logs-data:/app/logs
+      - ../shared/config/services/auth_service_config.yml:/app/config/auth_service_config.yml:ro
+    networks:
+      game-network:
+        aliases:
+          - auth-service
+    depends_on:
+      service_registry:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/api/v1/auth/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # 游戏数据服务
+  game_data_service:
+    image: game-microservices:${VERSION:-latest}
+    container_name: game-data-service
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVICE_NAME: game_data_service
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-game2025secret}
+      AUTH_SERVICE_URL: http://${AUTH_SERVICE_HOST:-auth-service}:${AUTH_SERVICE_INTERNAL_PORT:-8083}
+      SERVICE_REGISTRY_HOST: ${SERVICE_REGISTRY_HOST:-service-registry}
+      SERVICE_REGISTRY_PORT: ${SERVICE_REGISTRY_INTERNAL_PORT:-8090}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-game_microservices_jwt_secret_key_2025_very_secure}
+    ports:
+      - "${GAME_DATA_SERVICE_PORT:-8084}:8084"
+    volumes:
+      - logs-data:/app/logs
+      - ../shared/config/services/game_data_service.yml:/app/config/game_data_service.yml:ro
+    networks:
+      game-network:
+        aliases:
+          - game-data-service
+    depends_on:
+      service_registry:
+        condition: service_healthy
+      auth_service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8084/api/v1/gamedata/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # 五子棋游戏服务
+  gomoku_server:
+    image: game-microservices:${VERSION:-latest}
+    container_name: game-gomoku-server
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      SERVICE_NAME: gomoku_server
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_EXTERNAL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-game2025secret}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_EXTERNAL_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-game2025secret}
+      USER_SERVICE_URL: http://${USER_SERVICE_HOST:-user-service}:${USER_SERVICE_INTERNAL_PORT:-8082}
+      GAME_DATA_SERVICE_URL: http://${GAME_DATA_SERVICE_HOST:-game-data-service}:${GAME_DATA_SERVICE_INTERNAL_PORT:-8084}
+      AUTH_SERVICE_URL: http://${AUTH_SERVICE_HOST:-auth-service}:${AUTH_SERVICE_INTERNAL_PORT:-8083}
+      SERVICE_REGISTRY_HOST: ${SERVICE_REGISTRY_HOST:-service-registry}
+      SERVICE_REGISTRY_PORT: ${SERVICE_REGISTRY_INTERNAL_PORT:-8090}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-game_microservices_jwt_secret_key_2025_very_secure}
+    ports:
+      - "${GOMOKU_HTTP_PORT:-8085}:8085"
+      - "${GOMOKU_WS_PORT:-8086}:8086"
+    volumes:
+      - logs-data:/app/logs
+      - ../shared/config/services/gomoku_server.yml:/app/config/gomoku_server.yml:ro
+    networks:
+      game-network:
+        aliases:
+          - gomoku-server
+    depends_on:
+      service_registry:
+        condition: service_healthy
+      game_data_service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085/api/v1/gomoku/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+

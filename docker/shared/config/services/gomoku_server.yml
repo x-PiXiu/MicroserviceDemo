@@ -1,0 +1,478 @@
+# =============================================================================
+# 五子棋游戏服务配置文件 - Docker 容器版本
+# 版本: 2.0.0
+# 说明: 使用环境变量配置，适配 Docker 容器环境
+# =============================================================================
+
+# ==================== 服务基础配置 ====================
+service:
+  name: "gomoku_service"
+  version: "2.0.0"
+  description: "五子棋游戏服务 - 基于微服务架构"
+  environment: "${ENVIRONMENT}"
+  mode: "${SERVICE_MODE}"
+
+# ==================== 外部服务配置 ====================
+services:
+  user_service:
+    url: "http://${USER_SERVICE_HOST}:${USER_SERVICE_INTERNAL_PORT}"
+    timeout_seconds: 5
+    cache_ttl_seconds: 300
+    max_retries: 3
+    retry_delay_ms: 500
+
+  game_data_service:
+    url: "http://${GAME_DATA_SERVICE_HOST}:${GAME_DATA_SERVICE_INTERNAL_PORT}"
+    timeout_seconds: 5
+    cache_ttl_seconds: 180
+    max_retries: 3
+    retry_delay_ms: 500
+
+  auth_service:
+    url: "http://${AUTH_SERVICE_HOST}:${AUTH_SERVICE_INTERNAL_PORT}"
+    timeout_seconds: 5
+    cache_ttl_seconds: 300
+
+# ==================== 架构模式配置 ====================
+architecture:
+  simple_mode:
+    threads:
+      worker_threads: ${WORKER_THREADS}
+      io_threads: ${IO_THREADS}
+      event_threads: 1
+    components:
+      enable_kafka: false
+      enable_redis: false
+      enable_monitoring: false
+      enable_circuit_breaker: false
+      enable_time_wheel: false
+    storage:
+      mysql_pool_size: 3
+      redis_pool_size: 0
+
+  standard_mode:
+    threads:
+      worker_threads: 8
+      io_threads: 4
+      event_threads: 2
+    components:
+      enable_kafka: true
+      enable_redis: true
+      enable_monitoring: true
+      enable_circuit_breaker: true
+      enable_time_wheel: true
+    storage:
+      mysql_pool_size: 8
+      redis_pool_size: 4
+
+  enterprise_mode:
+    threads:
+      worker_threads: 16
+      io_threads: 8
+      event_threads: 4
+    components:
+      enable_kafka: true
+      enable_redis: true
+      enable_monitoring: true
+      enable_circuit_breaker: true
+      enable_time_wheel: true
+      enable_distributed_cache: true
+    storage:
+      mysql_pool_size: 20
+      redis_pool_size: 8
+
+# ==================== 网络配置 ====================
+network:
+  host: "0.0.0.0"
+  port: ${GOMOKU_HTTP_INTERNAL_PORT}
+  worker_threads: ${WORKER_THREADS}
+  io_threads: ${IO_THREADS}
+  max_connections: 1000
+  connection_timeout: 30
+  keep_alive_timeout: 30
+  send_buffer_size: 1024
+  recv_buffer_size: 1024
+  read_timeout: 60
+  write_timeout: 60
+  backlog: 1024
+  reuse_address: true
+  tcp_no_delay: true
+  keep_alive: true
+  enable_epoll: true
+
+# ==================== 数据库配置 ====================
+mysql:
+  host: "${MYSQL_HOST}"
+  port: ${MYSQL_EXTERNAL_PORT}
+  username: "${MYSQL_USER}"
+  password: "${MYSQL_ROOT_PASSWORD}"
+  database: "gomoku_game_db"
+  charset: "utf8mb4"
+  collation: "utf8mb4_general_ci"
+
+  pool:
+    initial_size: 5
+    max_size: ${MYSQL_POOL_SIZE}
+    min_size: 2
+    max_idle: 10
+    max_wait_time: 5000
+    max_idle_time_ms: 600000
+    validation_query: "SELECT 1"
+    validation_interval_ms: 30000
+    test_on_borrow: true
+    test_on_return: false
+    test_while_idle: true
+
+  mysql_connect_timeout_ms: 5000
+  mysql_read_timeout_ms: 5000
+  mysql_write_timeout_ms: 5000
+  mysql_auto_reconnect: true
+  mysql_max_reconnect_attempts: 3
+  mysql_reconnect_interval_ms: 1000
+
+  mysql_use_ssl: false
+  mysql_ssl_ca: ""
+  mysql_ssl_cert: ""
+  mysql_ssl_key: ""
+  mysql_ssl_cipher: ""
+  mysql_ssl_verify_server_cert: false
+
+  mysql_max_allowed_packet: 67108864
+  mysql_net_buffer_length: 16384
+  mysql_compress: false
+  mysql_init_command: ""
+
+  mysql_isolation_level: "REPEATABLE-READ"
+  mysql_autocommit: true
+  mysql_lock_wait_timeout: 50000
+
+# ==================== Redis 配置 ====================
+redis:
+  host: "${REDIS_HOST}"
+  port: ${REDIS_EXTERNAL_PORT}
+  password: "${REDIS_PASSWORD}"
+  database: 1
+
+  pool_size: 5
+  max_pool_size: ${REDIS_POOL_SIZE}
+  min_pool_size: 2
+  pool_timeout_ms: 5000
+  pool_max_idle_time_ms: 600000
+  pool_test_on_borrow: true
+  pool_test_on_return: false
+
+  connect_timeout_ms: 2000
+  socket_timeout_ms: 3000
+  command_timeout_ms: 3000
+  tcp_keepalive: false
+  tcp_keepalive_idle: 60
+  tcp_keepalive_interval: 30
+  tcp_keepalive_count: 3
+
+  auto_reconnect: true
+  max_reconnect_attempts: 3
+  reconnect_interval_ms: 1000
+  retry_attempts: 2
+  retry_delay_ms: 500
+
+  cluster_enabled: false
+  cluster_max_redirections: 5
+  cluster_require_full_coverage: true
+
+  sentinel_enabled: false
+  sentinel_master_name: "mymaster"
+  sentinel_password: ""
+  sentinel_timeout_ms: 5000
+
+  use_ssl: false
+  ssl_cert_file: ""
+  ssl_key_file: ""
+  ssl_ca_file: ""
+  ssl_verify_peer: false
+  ssl_ciphers: ""
+
+  pipeline_size: 10
+  enable_pipeline: false
+  max_memory_policy: 0
+  compress_data: false
+
+# ==================== 线程池配置 ====================
+thread_pool:
+  core_size: 6
+  max_size: 16
+  keep_alive_ms: 60000
+  queue_capacity: 1024
+  allow_core_timeout: false
+  rejection_policy: "abort"
+  prestart_core_threads: false
+  thread_priority: 5
+  name_prefix: "gomoku-service-"
+  enable_monitoring: true
+  monitoring_interval_ms: 5000
+
+# ==================== WebSocket配置 ====================
+websocket:
+  enabled: true
+  port: ${GOMOKU_WS_INTERNAL_PORT}
+  max_connections: 500
+  ping_interval: 30
+  pong_timeout: 10
+  compression: true
+  per_message_deflate: true
+
+# ==================== 安全配置 ====================
+security:
+  authentication:
+    enabled: true
+    token_verification_url: "http://${AUTH_SERVICE_HOST}:${AUTH_SERVICE_INTERNAL_PORT}/api/v1/auth/validate"
+    cache_tokens: true
+    token_cache_ttl: 300
+  rate_limiting:
+    enabled: ${ENABLE_RATE_LIMIT}
+    requests_per_minute: ${RATE_LIMIT_REQUESTS_PER_MINUTE}
+    requests_per_hour: 10000
+    burst_size: 100
+  cors:
+    enabled: ${ENABLE_CORS}
+    allowed_origins: [ "${CORS_ALLOWED_ORIGINS}" ]
+    allowed_methods: [ "GET", "POST", "PUT", "DELETE", "OPTIONS" ]
+    allowed_headers: [ "Content-Type", "Authorization", "X-Requested-With" ]
+    max_age: 3600
+
+# ==================== 五子棋游戏配置 ====================
+gomoku:
+  max_concurrent_games: 100
+  allow_spectators: true
+  enable_ranking: true
+  enable_replay: false
+  game_data_path: "/app/data/gomoku"
+
+  default_game_mode: 0
+  time_limit: 900
+  increment_per_move: 10
+  allow_undo: false
+  max_spectators: 50
+  ranking_enabled: true
+
+  require_ready_to_start: false
+  auto_start_when_full: false
+  auto_start_delay_ms: 3000
+
+  enable_database: true
+  save_game_records: true
+  save_move_history: true
+  save_chat_messages: true
+  enable_statistics: true
+
+  max_rooms: 1000
+  room_idle_timeout: 1800
+  auto_destroy_empty_rooms: true
+  room_cleanup_interval: 300
+
+# ==================== 缓存配置 ====================
+cache:
+  enable: true
+  leaderboard: true
+  user_stats: true
+  room_states: true
+  expire_seconds: 3600
+  ttl:
+    leaderboard: 300
+    user_profile: 600
+    room_info: 60
+    game_statistics: 300
+
+# ==================== 日志配置 ====================
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: true
+    path: "/app/logs/gomoku_server.log"
+    max_size: 536870912
+    max_files: 5
+  async:
+    enabled: false
+  level: "${LOG_LEVEL}"
+
+# ==================== 服务注册中心配置 ====================
+service_registry:
+  enabled: true
+  host: "${SERVICE_REGISTRY_HOST}"
+  port: ${SERVICE_REGISTRY_INTERNAL_PORT}
+  heartbeat_interval_s: 30
+  register_timeout_s: 10
+  request_timeout_ms: 5000
+  auto_heartbeat: true
+  auto_reconnect: true
+  reconnect_delay_s: 5
+  metadata:
+    region: "cn-east"
+
+# ==================== 监控配置 ====================
+monitoring:
+  enabled: true
+  metrics:
+    enabled: true
+    port: 9084
+    path: "/metrics"
+  health_check:
+    enabled: true
+    path: "/api/v1/gomoku/health"
+    interval: 30
+    timeout: 5
+  performance:
+    track_requests: true
+    track_database_queries: true
+    track_cache_operations: true
+    track_game_operations: true
+    slow_query_threshold: 1000
+    slow_game_operation_threshold: 5000
+
+# ==================== 业务配置 ====================
+business:
+  game_matching:
+    enabled: true
+    skill_based_matching: true
+    max_rating_difference: 200
+    match_timeout: 60
+
+# ==================== 匹配池详细配置 ====================
+match:
+  max_pool_size: 1000
+  max_wait_seconds: 300
+  match_interval_ms: 100
+
+  initial_rating_range: 100
+  rating_expansion_per_interval: 25
+  max_rating_expansion: 500
+
+  priority_wait_threshold_seconds: 30
+  high_priority_expansion_bonus: 50
+
+  excellent_quality_threshold: 50
+  good_quality_threshold: 100
+  fair_quality_threshold: 200
+
+  rating_weight: 0.6
+  wait_time_weight: 0.3
+  tier_weight: 0.1
+
+  leaderboard:
+    enabled: true
+    update_interval: 300
+    max_entries: 1000
+    seasonal_reset: false
+
+  replay_system:
+    enabled: false
+    storage_path: "/app/data/replays"
+    max_replay_size: "50MB"
+    retention_days: 30
+
+  anti_cheat:
+    enabled: true
+    move_time_analysis: true
+    pattern_detection: true
+    suspicious_move_threshold: 5
+
+# ==================== JWT 认证配置 ====================
+jwt:
+  secret_key: "${JWT_SECRET_KEY}"
+  issuer: "game-microservices-auth"
+  audience: "game-microservices-clients"
+  algorithm: "HS256"
+  clock_skew_seconds: 60
+  validate_issuer: true
+  validate_audience: false
+  validate_expiration: true
+
+# ==================== 认证中间件配置 ====================
+auth_middleware:
+  enabled: true
+  token_header: "Authorization"
+  token_prefix: "Bearer "
+  exclude_paths:
+    - "/health"
+    - "/info"
+    - "/stats"
+    - "/api/v1/gomoku/health"
+
+# ==================== 环境配置 ====================
+development:
+  debug_mode: true
+  mock_external_services: false
+  enable_cors: true
+  log_all_requests: true
+  database:
+    show_sql: true
+    log_slow_queries: true
+  cache:
+    disable_for_testing: false
+  game:
+    allow_debug_commands: true
+    fast_game_mode: false
+
+testing:
+  debug_mode: false
+  database:
+    use_test_db: true
+    reset_data_on_start: true
+  cache:
+    use_memory_cache: true
+  external_services:
+    mock_user_service: true
+    mock_game_data_service: true
+  game:
+    accelerated_time: true
+    skip_animations: true
+
+production:
+  debug_mode: false
+  security:
+    enforce_https: true
+    strict_cors: true
+    enable_audit_log: true
+  database:
+    use_read_replicas: true
+    enable_connection_pooling: true
+  cache:
+    enable_clustering: true
+    backup_enabled: true
+  monitoring:
+    alert_on_errors: true
+    alert_on_high_latency: true
+    performance_tracking: true
+  game:
+    strict_validation: true
+    enhanced_anti_cheat: true
+
+# ==================== Kafka事件总线配置 ====================
+kafka:
+  enabled: ${USE_KAFKA}
+  brokers: "${KAFKA_HOST}:${KAFKA_PORT}"
+  topic_prefix: "gomoku_events_"
+  consumer_group: "gomoku_service"
+  client_id: "gomoku_client"
+  partition_count: 3
+  timeout_ms: 5000
+  enable_auto_commit: true
+  batch_size: 100
+
+  cross_service_events:
+    - "user.status.changed"
+    - "user.rating.updated"
+    - "game.ended"
+    - "service.health.changed"
+    - "circuit_breaker.state.changed"
+
+  local_only_events:
+    - "game.move.made"
+    - "game.room.created"
+    - "game.room.destroyed"
+
+  topic_routing:
+    user_events: "user"
+    game_events: "game"
+    system_events: "system"
+    default: "default"

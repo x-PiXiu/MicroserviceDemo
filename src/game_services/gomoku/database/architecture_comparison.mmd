@@ -1,0 +1,78 @@
+
+```mermaid
+---
+title: 五子棋游戏服务架构对比图
+
+---
+
+graph TB
+    subgraph "修复前架构 ❌"
+        subgraph GomokuOld["五子棋服务 (问题版)"]
+            ServerOld[GomokuServer]
+            JWTValidatorOld[JWT验证器<br/>❌冗余]
+            AuthClientOld[认证服务客户端<br/>❌模拟数据]
+            WSHandlerOld[WebSocket处理器<br/>❌会话创建失败]
+            ThreadPool1[线程池1]
+            ThreadPool2[线程池2]
+            ThreadPool3[线程池3<br/>❌资源浪费]
+        end
+        
+   
+   subgraph DatabaseOld["数据库 (问题版)"]
+        GomokuDBOld[(gomoku_game_db)]
+        UserDBOld[(user_service_db<br/>❌跨库外键)]
+        GameDBOld[(game_service_db<br/>❌数据冗余)]
+    end
+    
+    GomokuOld -.->|❌跨库外键| UserDBOld
+    GomokuOld -.->|❌同步调用| GameDBOld
+    JWTValidatorOld -.->|❌从未真正调用| AuthSvcOld[认证服务]
+    AuthClientOld -.->|❌返回假数据| AuthSvcOld
+end
+
+subgraph "修复后架构 ✅"
+    subgraph Gateway["API网关层"]
+        APIGateway[API网关<br/>✅统一认证]
+        AuthValidator[JWT验证器<br/>✅统一位置]
+    end
+    
+    subgraph GomokuNew["五子棋服务 (修复版)"]
+        ServerNew[GomokuServer<br/>✅简化架构]
+        WSHandlerNew[WebSocket处理器<br/>✅会话创建正常]
+        UnifiedThreadPool[统一线程池<br/>✅避免资源浪费]
+        DatabaseNew[数据库访问层<br/>✅简化调用]
+    end
+    
+    subgraph DatabaseNew["数据库 (修复版)"]
+        GomokuDBNew[(gomoku_game_db<br/>✅专注游戏数据)]
+        Views[(视图<br/>✅查询优化)]
+        Configs[(配置表<br/>✅简化管理)]
+    end
+    
+    subgraph MessageQueue["事件驱动"]
+        MQ[消息队列<br/>✅异步通信]
+        EventHandlers[事件处理器<br/>✅解耦服务]
+    end
+    
+    Client[客户端] --> APIGateway
+    APIGateway -->|✅预认证| ServerNew
+    ServerNew --> UnifiedThreadPool
+    ServerNew --> DatabaseNew
+    ServerNew --> MQ
+    MQ --> EventHandlers
+    
+    GomokuDBNew --> Views
+    GomokuDBNew --> Configs
+end
+
+%% 样式定义
+classDef oldStyle fill:#ffebee,stroke:#c62828,stroke-width:2px
+classDef newStyle fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+classDef problemStyle fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+classDef fixStyle fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+
+class GomokuOld,DatabaseOld oldStyle
+class GomokuNew,DatabaseNew,Gateway,MessageQueue newStyle
+class JWTValidatorOld,AuthClientOld,ThreadPool1,ThreadPool2,ThreadPool3 problemStyle
+class APIGateway,UnifiedThreadPool,MQ,EventHandlers fixStyle
+```

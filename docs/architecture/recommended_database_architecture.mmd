@@ -1,0 +1,122 @@
+
+            
+```mermaid
+graph TB
+    %% 推荐的统一数据库架构图
+    subgraph "🏢 统一数据库集群"
+        subgraph "👤 用户服务数据库"
+            UserDB[(user_service_db)]
+            UserTables["📋 用户核心数据:
+            • users (基础用户信息)
+            • user_profiles (用户档案)
+            • user_sessions (会话管理)
+            • user_preferences (偏好设置)
+            • user_friends (好友关系)
+            • user_authentication_logs"]        
+        UserDB --- UserTables
+    end
+    
+    subgraph "🎮 游戏数据服务"
+        GameDB[(game_service_db)]
+        GameTables["📋 跨游戏数据:
+        • user_game_profiles (用户游戏档案)
+        • game_achievements (成就系统)
+        • user_inventory (道具系统)
+        • user_currency (虚拟货币)
+        • cross_game_stats (跨游戏统计)
+        • game_type_registry (游戏类型注册)"]
+        
+        GameDB --- GameTables
+    end
+    
+    subgraph "🎯 五子棋业务数据"
+        GomokuDB[(gomoku_business_db)]
+        GomokuBusinessTables["📋 五子棋专有数据:
+        • gomoku_rooms (房间管理)
+        • gomoku_games (游戏记录)
+        • gomoku_moves (移动记录)
+        • gomoku_tournaments (锦标赛)
+        • gomoku_ai_analysis (AI分析)
+        • gomoku_replays (棋谱回放)"]
+        
+        GomokuDB --- GomokuBusinessTables
+    end
+    
+    subgraph "🐍 贪吃蛇业务数据"
+        SnakeDB[(snake_business_db)]
+        SnakeBusinessTables["📋 贪吃蛇专有数据:
+        • snake_games (游戏记录)
+        • snake_levels (关卡设计)
+        • snake_power_ups (道具系统)
+        • snake_challenges (挑战模式)"]
+        
+        SnakeDB --- SnakeBusinessTables
+    end
+end
+
+%% 服务层
+subgraph "🚀 微服务层"
+    AuthService[🔐 认证服务<br/>统一身份管理]
+    UserService[👤 用户服务<br/>用户信息管理]
+    GameService[🎮 游戏数据服务<br/>跨游戏数据管理]
+    GomokuService[🎯 五子棋服务<br/>专注游戏逻辑]
+    SnakeService[🐍 贪吃蛇服务<br/>专注游戏逻辑]
+    Gateway[🌐 API网关<br/>路由和认证]
+end
+
+%% 用户交互
+User[👤 用户客户端]
+
+%% 数据流
+User -.->|所有请求| Gateway
+Gateway -.->|身份验证| AuthService
+Gateway -.->|路由转发| GomokuService
+Gateway -.->|路由转发| SnakeService
+
+AuthService -.->|验证身份| UserService
+GomokuService -.->|获取用户信息| UserService
+GomokuService -.->|获取/更新游戏数据| GameService
+SnakeService -.->|获取用户信息| UserService
+SnakeService -.->|获取/更新游戏数据| GameService
+
+%% 数据库连接
+AuthService -.->|会话管理| UserDB
+UserService -.->|用户CRUD| UserDB
+GameService -.->|游戏数据CRUD| GameDB
+GomokuService -.->|业务数据| GomokuDB
+SnakeService -.->|业务数据| SnakeDB
+
+%% 数据同步
+UserService -.->|同步游戏档案| GameDB
+GameService -.->|统计数据同步| UserDB
+
+%% 样式
+classDef userClass fill:#e3f2fd,stroke:#1976d2,stroke-width:2px,color:#0d47a1;
+classDef gameClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,color:#4a148c;
+classDef businessClass fill:#e8f5e8,stroke:#388e3c,stroke-width:2px,color:#1b5e20;
+classDef serviceClass fill:#fff8e1,stroke:#f57c00,stroke-width:2px,color:#ef6c00;
+
+class UserDB,UserService userClass;
+class GameDB,GameService gameClass;
+class GomokuDB,GomokuService,SnakeDB,SnakeService businessClass;
+class AuthService,Gateway serviceClass;
+
+%% 优势标注
+Advantage1[✅ 单一数据源
+用户信息统一管理，无重复]
+
+Advantage2[✅ 数据一致性
+所有服务使用相同的用户数据]
+
+Advantage3[✅ 跨游戏数据
+成就、道具、货币可跨游戏使用]
+
+Advantage4[✅ 易于扩展
+新游戏服务只需关注业务逻辑]
+
+UserService -.->|保证| Advantage1
+Advantage1 -.-> Advantage2
+GameService -.->|实现| Advantage3
+Advantage2 -.-> Advantage4
+```
+

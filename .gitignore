@@ -1,0 +1,378 @@
+# ==================== C++微服务项目 .gitignore ====================
+# 专为企业级C++微服务项目设计的完整.gitignore文件
+
+# ==================== 编译生成的文件 ====================
+# 可执行文件和库文件
+/bin/
+/lib/
+/build/
+/cmake-build-*/
+/out/
+/dist/
+
+# 编译中间文件
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.lo
+*.la
+*.lai
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# 静态分析文件
+*.sarif
+
+# ==================== CMake相关文件 ====================
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+CMakeUserPresets.json
+
+
+# ==================== 构建系统文件 ====================
+# Make
+*.make
+*.mk
+
+# Ninja
+.ninja_deps
+.ninja_log
+build.ninja
+
+# Bazel
+bazel-*
+
+# Conan
+conanfile.txt.user
+conaninfo.txt
+conanbuildinfo.*
+conan.lock
+
+# vcpkg
+vcpkg_installed/
+# 包管理器目录
+conanbuildinfo/
+
+# ==================== IDE和编辑器文件 ====================
+## Visual Studio
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+*.userosscache
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+*.ipch
+
+## Visual Studio Code
+.vscode/
+*.code-workspace
+.history/
+
+## CLion / IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+cmake-build-*/
+
+## Eclipse CDT
+.project
+.cproject
+.settings/
+.metadata/
+
+## Qt Creator
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+CMakeLists.txt.user*
+
+## Xcode
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+*.xccheckout
+*.moved-aside
+DerivedData/
+
+## Code::Blocks
+*.cbp
+*.layout
+*.depend
+
+## Dev-C++
+*.dev
+
+## Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+## Vim
+*.swp
+*.swo
+*~
+.netrwhist
+
+## Emacs
+
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# ==================== 操作系统文件 ====================
+## macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+## Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+## Linux
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ==================== 微服务特定文件 ====================
+## 配置文件（可能包含敏感信息）
+config/config.json
+config.yaml
+config/config.yml
+*.conf
+!example.conf
+!default.conf
+!template.conf
+.env
+.env.local
+.env.*.local
+secrets.json
+credentials.json
+
+## 服务注册和发现
+consul.json
+etcd.json
+zookeeper.properties
+
+## 数据库配置
+database.json
+db.conf
+mysql.conf
+redis.conf
+mongodb.conf
+
+## 消息队列配置
+kafka.properties
+rabbitmq.conf
+activemq.conf
+
+# ==================== 日志和监控文件 ====================
+## 日志文件
+*.log
+*.log.*
+logs/
+log/
+/var/log/
+
+## 监控和指标
+metrics/
+traces/
+*.trace
+
+## 性能分析文件
+gmon.out
+callgrind.out.*
+perf.data
+perf.data.old
+*.prof
+*.pprof
+
+# ==================== 数据文件 ====================
+## 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+*.db3
+dump.rdb
+*.mdb
+*.accdb
+
+## 缓存文件
+*.cache
+cache/
+.cache/
+
+## 数据导出文件
+*.csv
+*.json.bak
+*.xml.bak
+data/
+backup/
+
+# ==================== 测试相关文件 ====================
+## 测试结果
+test-results/
+test-reports/
+TestResults/
+
+## 覆盖率报告
+coverage/
+*.gcov
+*.gcda
+*.gcno
+*.lcov
+htmlcov/
+.coverage
+.nyc_output
+
+## 单元测试
+gtest_output.xml
+junit.xml
+
+# ==================== 文档生成文件 ====================
+## Doxygen
+/docs/html/
+/docs/latex/
+/docs/xml/
+/docs/doxygen/
+Doxyfile.bak
+
+## Sphinx
+_build/
+_static/
+_templates/
+
+# ==================== 容器化文件 ====================
+## Docker
+.dockerignore.bak
+docker-compose.override.yml
+.docker/
+docker/third_party/
+
+## Kubernetes
+*.kubeconfig
+kustomization.yaml.bak
+
+# ==================== 前端项目 (game-platform-client) ====================
+## 依赖目录
+node_modules/
+.pnpm-store/
+
+## 构建产物
+dist/
+build/
+.output/
+.nuxt/
+.next/
+
+## 环境变量（可能包含敏感信息）
+.env
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+## 包管理器锁文件（选择一个保留，其他忽略）
+# 如果使用 npm，保留 package-lock.json，忽略其他
+yarn.lock
+pnpm-lock.yaml
+
+## 测试覆盖率
+coverage/
+*.lcov
+.nyc_output
+
+## TypeScript 缓存
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+## Vite 缓存
+.vite/
+
+## ESLint 缓存
+.eslintcache
+
+## 调试日志
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+## Playwright 测试结果
+test-results/
+playwright-report/
+blob-report/
+
+## 本地 IDE 配置（前端项目内）
+*.code-workspace
+.history/
+
+# ==================== 通用忽略补充 ====================
+## 临时文件
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+## 压缩包
+*.tar.gz
+*.tgz
+*.zip
+*.rar
+*.7z
+
+## SSL/TLS 证书（本地开发用）
+*.pem
+*.key
+*.crt
+*.csr
+!docker/shared/certs/*.pem

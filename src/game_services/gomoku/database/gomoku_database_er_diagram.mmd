@@ -1,0 +1,199 @@
+
+```mermaid
+---
+title: 五子棋游戏服务数据库ER图 (重构版 v2.0.0)
+
+---
+
+erDiagram
+    %% =========================================================================
+    %% 核心游戏表
+    %% =========================================================================
+    
+
+GOMOKU_USERS {
+    VARCHAR user_id PK "用户ID(本地缓存)"
+    VARCHAR username "用户名"
+    VARCHAR nickname "昵称"
+    INT current_rating "当前评分"
+    INT peak_rating "历史最高评分"
+    INT total_games "总游戏数"
+    INT wins "胜局数"
+    INT losses "败局数"
+    INT draws "平局数"
+    INT total_playtime_minutes "总游戏时长"
+    TIMESTAMP last_game_at "最后游戏时间"
+    BOOLEAN is_active "是否活跃"
+    TIMESTAMP created_at "创建时间"
+    TIMESTAMP updated_at "更新时间"
+}
+
+GOMOKU_ROOMS {
+    VARCHAR room_id PK "房间ID"
+    VARCHAR room_name "房间名称"
+    VARCHAR creator_id "创建者ID(只存ID)"
+    ENUM game_mode "游戏模式"
+    ENUM room_type "房间类型"
+    BOOLEAN is_private "是否私人房间"
+    VARCHAR password_hash "房间密码哈希"
+    INT max_spectators "最大观战人数"
+    BOOLEAN allow_spectators "是否允许观战"
+    JSON game_config "游戏配置(JSON)"
+    ENUM room_state "房间状态"
+    TINYINT player_count "当前玩家数量"
+    TIMESTAMP created_at "创建时间"
+    TIMESTAMP started_at "开始游戏时间"
+    TIMESTAMP finished_at "结束时间"
+    TIMESTAMP last_activity_at "最后活动时间"
+    INT version "版本号(乐观锁)"
+}
+
+GOMOKU_GAMES {
+    BIGINT game_id PK "游戏ID"
+    VARCHAR room_id "房间ID"
+    VARCHAR black_player_id "黑方玩家ID(只存ID)"
+    VARCHAR white_player_id "白方玩家ID(只存ID)"
+    ENUM game_mode "游戏模式"
+    ENUM game_type "游戏类型"
+    ENUM game_result "游戏结果"
+    VARCHAR winner_id "获胜者ID"
+    ENUM win_type "获胜方式"
+    JSON winning_line "获胜线路坐标"
+    INT total_moves "总步数"
+    INT game_duration_seconds "游戏持续时间"
+    INT black_time_used_seconds "黑方用时"
+    INT white_time_used_seconds "白方用时"
+    JSON final_board_state "最终棋盘状态"
+    TIMESTAMP created_at "创建时间"
+    TIMESTAMP started_at "开始时间"
+    TIMESTAMP finished_at "结束时间"
+    VARCHAR server_id "服务器ID"
+    VARCHAR server_version "服务器版本"
+}
+
+GOMOKU_MOVES {
+    BIGINT move_id PK "移动ID"
+    BIGINT game_id FK "游戏ID"
+    SMALLINT move_number "步数序号"
+    VARCHAR player_id "玩家ID"
+    ENUM piece_type "棋子类型"
+    SMALLINT position "位置编码(row*15+col)"
+    TIMESTAMP move_timestamp "落子时间戳(毫秒精度)"
+    INT time_used_ms "本步思考时间(毫秒)"
+    INT remaining_time_seconds "剩余时间(秒)"
+    BOOLEAN is_forbidden "是否禁手"
+    ENUM forbidden_type "禁手类型"
+}
+
+%% =========================================================================
+%% 社交功能表
+%% =========================================================================
+
+GOMOKU_SPECTATORS {
+    BIGINT id PK "ID"
+    BIGINT game_id FK "游戏ID"
+    VARCHAR user_id "观战用户ID"
+    TIMESTAMP join_time "加入观战时间"
+    TIMESTAMP leave_time "离开观战时间"
+    INT watch_duration_seconds "观战时长(秒)"
+}
+
+GOMOKU_CHAT_MESSAGES {
+    BIGINT message_id PK "消息ID"
+    VARCHAR room_id "房间ID"
+    VARCHAR user_id "发送者ID"
+    ENUM message_type "消息类型"
+    VARCHAR content "消息内容(限制500字符)"
+    TIMESTAMP created_at "发送时间"
+}
+
+%% =========================================================================
+%% 配置和监控表
+%% =========================================================================
+
+GOMOKU_CONFIGS {
+    BIGINT config_id PK "配置ID"
+    VARCHAR config_name UK "配置名称"
+    JSON config_data "配置数据"
+    BOOLEAN is_active "是否启用"
+    TIMESTAMP created_at "创建时间"
+    TIMESTAMP updated_at "更新时间"
+}
+
+GOMOKU_SERVER_STATUS {
+    BIGINT id PK "ID"
+    VARCHAR server_id "服务器ID"
+    ENUM status "服务器状态"
+    INT active_rooms "活跃房间数"
+    INT active_games "活跃游戏数"
+    INT connected_players "连接玩家数"
+    INT memory_usage_mb "内存使用量(MB)"
+    INT uptime_seconds "运行时间(秒)"
+    INT thread_pool_size "线程池大小"
+    INT active_threads "活跃线程数"
+    INT queue_size "任务队列大小"
+    TIMESTAMP recorded_at "记录时间"
+}
+
+%% =========================================================================
+%% 视图 (只读查询优化)
+%% =========================================================================
+
+ACTIVE_ROOMS {
+    VARCHAR room_id "房间ID"
+    VARCHAR room_name "房间名称"
+    VARCHAR creator_id "创建者ID"
+    ENUM game_mode "游戏模式"
+    ENUM room_type "房间类型"
+    ENUM room_state "房间状态"
+    TINYINT player_count "当前玩家数量"
+    TIMESTAMP created_at "创建时间"
+}
+
+RECENT_GAMES {
+    BIGINT game_id "游戏ID"
+    VARCHAR room_id "房间ID"
+    VARCHAR black_player_id "黑方玩家ID"
+    VARCHAR white_player_id "白方玩家ID"
+    ENUM game_result "游戏结果"
+    VARCHAR winner_id "获胜者ID"
+    INT total_moves "总步数"
+    INT game_duration_seconds "游戏持续时间"
+    TIMESTAMP finished_at "结束时间"
+}
+
+THREAD_POOL_STATUS {
+    VARCHAR server_id "服务器ID"
+    INT thread_pool_size "线程池大小"
+    INT active_threads "活跃线程数"
+    INT queue_size "任务队列大小"
+    DECIMAL thread_utilization_percent "线程利用率百分比"
+    TIMESTAMP recorded_at "记录时间"
+}
+
+%% =========================================================================
+%% 🔧 关系定义 (移除跨数据库外键，只保留本地关系)
+%% =========================================================================
+
+%% 核心游戏关系
+GOMOKU_GAMES ||--o{ GOMOKU_MOVES : "游戏包含多个移动"
+GOMOKU_GAMES ||--o{ GOMOKU_SPECTATORS : "游戏可有多个观战者"
+
+%% 用户关系（应用层维护，本地缓存表）
+GOMOKU_USERS ||--o{ GOMOKU_ROOMS : "用户创建房间(应用层维护)"
+GOMOKU_USERS ||--o{ GOMOKU_GAMES : "用户参与游戏(应用层维护)"
+GOMOKU_USERS ||--o{ GOMOKU_MOVES : "用户落子(应用层维护)"
+GOMOKU_USERS ||--o{ GOMOKU_SPECTATORS : "用户观战(应用层维护)"
+GOMOKU_USERS ||--o{ GOMOKU_CHAT_MESSAGES : "用户聊天(应用层维护)"
+
+%% 注意：房间和游戏的关系通过应用层维护，不使用外键
+GOMOKU_ROOMS ||--o| GOMOKU_GAMES : "房间产生游戏(应用层维护)"
+
+%% 聊天消息与房间的关系通过应用层维护
+GOMOKU_ROOMS ||--o{ GOMOKU_CHAT_MESSAGES : "房间包含聊天消息(应用层维护)"
+
+%% 视图与基表的关系
+GOMOKU_ROOMS ||--|| ACTIVE_ROOMS : "视图"
+GOMOKU_GAMES ||--|| RECENT_GAMES : "视图"
+GOMOKU_SERVER_STATUS ||--|| THREAD_POOL_STATUS : "视图"
+```

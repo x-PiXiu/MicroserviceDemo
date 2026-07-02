@@ -1,0 +1,374 @@
+# =============================================================================
+# 用户核心服务配置文件 - 重构版本
+# 版本: 1.0.0
+# 日期: 2025-09-20
+# 说明: 基于http_config.yml格式的统一配置结构
+# =============================================================================
+
+# ==================== 服务基础配置 ====================
+server:
+  name: "user_service"
+  version: "1.0.0"
+  description: "用户核心服务 - 管理用户基础数据"
+  environment: "development"
+
+# ==================== 网络配置 ====================
+network:
+  host: "0.0.0.0"
+  port: 8082
+  worker_threads: 4
+  io_threads: 2
+  max_connections: 1000
+  connection_timeout: 30
+  keep_alive_timeout: 30
+  send_buffer_size: 1024
+  recv_buffer_size: 1024
+  read_timeout: 60
+  write_timeout: 60
+  backlog: 1024
+  reuse_address: true
+  tcp_no_delay: true
+  keep_alive: true
+  enable_epoll: true
+
+# ==================== 服务基础配置 ====================
+http:
+  server:
+    # HTTP协议配置
+    max_request_size: 1048576       # 最大请求大小（1MB）
+    max_header_size: 8192           # 最大头部大小（8KB）
+    keep_alive_timeout_ms: 60000    # Keep-Alive超时时间（60秒）
+    request_timeout_ms: 30000       # 3请求超时时间（30秒）
+    max_keep_alive_requests: 1024   # 单连接最大请求数
+
+    # 线程池配置
+    enable_thread_pool: true        # 是否启用线程池
+    worker_threads: 0               # 自动获取线程数
+
+    # 性能优化配置
+    enable_tcp_nodelay: true        # 禁用Nagle算法
+    send_buffer_size: 65535         # 发送缓冲区大小（64KB）
+    receive_buffer_size: 65535      # 接收缓冲区大小（64KB）
+    enable_keep_alive: true         # 启用keep-alive
+    linger_timeout: 0               # SO_LINGER超时时间（0=立即关闭）
+    enable_so_linger: true          # 启用SO_LINGER
+    enable_so_reuseaddr: true       # 启用SO_REUSEADDR
+
+    # 监控配置
+    enable_performance_monitoring: true  # 启用性能监控
+    stats_interval_ms: 30000         # 统计间隔（5秒）
+
+    # 静态文件服务配置
+    enable_directory_listing: false;     #启用目录浏览
+    max_static_file_size: 100 * 1024 * 1024; #最大静态文件大小（100MB）
+    static_file_cache_time: 3600;         #静态文件缓存时间（秒）
+
+# ==================== 数据库配置 ====================
+mysql:
+  # --- 基础连接信息 ---
+  host: "127.0.0.1"                   # MySQL 服务器主机名或IP地址
+  port: 3306                          # MySQL 服务端口
+  username: "root"                    # 登录用户名
+  password: "013ee244b29700ed"                  # 登录密码（生产环境建议使用密钥管理或环境变量）
+  database: "user_service_db"         # 默认连接的数据库名
+  charset: "utf8mb4"                  # 客户端字符集（推荐 utf8mb4 支持 Emoji 和完整 Unicode）
+  collation: "utf8mb4_general_ci"     # 字符校对规则（区分大小写、排序规则等）
+
+  enable_async_operations: true
+  thread_pool_core_size: 4;
+  thread_pool_max_size: 16;
+  thread_pool_keep_alive_ms: 60000;
+  thread_pool_queue_capacity: 1000;
+  thread_pool_enable_monitoring: true;
+
+
+  # --- 连接池配置 ---
+  pool:
+    initial_size: 5                   # 启动时初始化的连接数
+    max_size: 20                      # 连接池最大连接数（超过将等待或拒绝）
+    min_size: 2                       # 连接池保持的最小空闲连接数
+    max_idle: 10                      # 最大空闲连接数（超过将被回收）
+    max_wait_time: 5000               # 获取连接的最大等待时间（毫秒），超时抛异常
+    max_idle_time_ms: 600000          # 连接最大空闲时间（毫秒），超时自动回收（10分钟）
+    validation_query: "SELECT 1"      # 用于验证连接是否有效的SQL语句
+    validation_interval_ms: 30000     # 空闲连接检测间隔（毫秒，30秒）
+    test_on_borrow: true              # 借出连接前是否验证有效性
+    test_on_return: false             # 归还连接时是否验证有效性
+    test_while_idle: true             # 空闲时是否定期验证连接有效性
+
+  # ========== 适配代码配置键名 ==========
+
+  # --- 连接与重连参数 ---
+  mysql_connect_timeout_ms: 5000      # 连接超时时间（毫秒），0表示无限等待
+  mysql_read_timeout_ms: 5000         # 读取数据超时时间（毫秒）
+  mysql_write_timeout_ms: 5000        # 写入数据超时时间（毫秒）
+  mysql_auto_reconnect: true          # 是否自动重连（断开后尝试恢复）
+  mysql_max_reconnect_attempts: 3     # 最大重连尝试次数
+  mysql_reconnect_interval_ms: 30000   # 重连间隔时间（毫秒）
+
+  # --- SSL 安全连接配置 ---
+  mysql_use_ssl: false                # 是否启用 SSL 加密连接
+  mysql_ssl_ca: ""                    # CA 证书路径（用于验证服务端证书）
+  mysql_ssl_cert: ""                  # 客户端证书路径（双向认证时使用）
+  mysql_ssl_key: ""                   # 客户端私钥路径（双向认证时使用）
+  mysql_ssl_cipher: ""                # 指定加密套件（如 "AES256-SHA"）
+  mysql_ssl_verify_server_cert: false # 是否验证服务端证书域名（生产环境建议开启）
+
+  # --- 性能调优参数 ---
+  mysql_max_allowed_packet: 67108864  # 最大允许的包大小（字节），默认 64MB，防止大数据包失败
+  mysql_net_buffer_length: 16384      # 网络缓冲区初始大小（字节），默认 16KB
+  mysql_compress: false               # 是否启用网络传输压缩（节省带宽，增加CPU开销）
+  mysql_init_command: ""              # 连接建立后执行的初始化SQL（如 "SET time_zone='+08:00'"）
+
+  # --- 事务与隔离级别配置 ---
+  mysql_isolation_level: "REPEATABLE-READ"  # 事务隔离级别：READ-UNCOMMITTED, READ-COMMITTED, REPEATABLE-READ, SERIALIZABLE
+  mysql_autocommit: true              # 是否自动提交事务（false 时需手动 commit/rollback）
+  mysql_lock_wait_timeout: 50000      # 行锁等待超时时间（毫秒），默认 50 秒，超时抛 Lock wait timeout 错误
+
+# ==================== Redis 配置 ====================
+redis:
+  # --- 基础连接信息 ---
+  host: "127.0.0.1"                       # Redis 服务器主机名或IP地址
+  port: 6379                          # Redis 服务端口
+  password: "123456"                  # 认证密码（生产环境建议使用密钥管理）
+  database: 3                         # 使用的数据库编号（0-15，默认0）
+
+  enable_async_operations: true
+  thread_pool_core_size: 4;
+  thread_pool_max_size: 16;
+  thread_pool_keep_alive_ms: 60000;
+  thread_pool_queue_capacity: 1000;
+  thread_pool_enable_monitoring: true;
+
+  # --- 连接池配置 ---
+  pool_size: 5                        # 初始连接池大小（启动时创建）
+  max_pool_size: 20                   # 最大连接数（超过将等待或拒绝）
+  min_pool_size: 2                    # 最小空闲连接数（维持连接保活）
+  pool_timeout_ms: 5000               # 获取连接最大等待时间（毫秒）
+  pool_max_idle_time_ms: 600000       # 连接最大空闲时间（毫秒，10分钟超时回收）
+  pool_test_on_borrow: true           # 借出前是否测试连接有效性
+  pool_test_on_return: false          # 归还时是否测试连接有效性
+  # test_while_idle: true             # （保留）空闲时是否测试（代码未使用，可选保留）
+  pool_validation_interval_ms: 30000     # 空闲连接检测间隔（毫秒，30秒）
+
+  # --- 连接超时与网络参数 ---
+  connect_timeout_ms: 2000            # 建立连接超时时间（毫秒）
+  socket_timeout_ms: 3000             # Socket 读写超时（毫秒）
+  command_timeout_ms: 3000            # 单条命令执行超时（毫秒）
+  tcp_keepalive: false                # 是否启用 TCP KeepAlive
+  tcp_keepalive_idle: 60              # KeepAlive 空闲时间（秒）
+  tcp_keepalive_interval: 30          # KeepAlive 探测间隔（秒）
+  tcp_keepalive_count: 3              # KeepAlive 探测失败次数上限
+
+  # --- 重连与重试机制 ---
+  auto_reconnect: true                # 连接断开后是否自动重连
+  max_reconnect_attempts: 3           # 最大重连尝试次数
+  reconnect_interval_ms: 1000         # 重连间隔（毫秒）
+  retry_attempts: 2                   # 命令失败后重试次数
+  retry_delay_ms: 500                 # 命令重试间隔（毫秒）
+
+  # --- 集群模式配置 ---
+  cluster_enabled: false              # 是否启用 Redis Cluster 模式
+  cluster_max_redirections: 5         # 最大重定向次数（避免无限循环）
+  cluster_require_full_coverage: true # 是否要求所有哈希槽都可用才接受请求
+
+  # --- 哨兵模式配置 ---
+  sentinel_enabled: false             # 是否启用 Redis Sentinel 高可用模式
+  sentinel_master_name: "mymaster"    # Sentinel 监控的主节点名称
+  sentinel_password: ""               # Sentinel 认证密码（如配置了 requirepass）
+  sentinel_timeout_ms: 5000           # Sentinel 连接超时（毫秒）
+
+  # --- SSL/TLS 安全连接 ---
+  use_ssl: false                      # 是否启用 SSL/TLS 加密连接
+  ssl_cert_file: ""                   # 客户端证书文件路径（双向认证）
+  ssl_key_file: ""                    # 客户端私钥文件路径
+  ssl_ca_file: ""                     # CA 证书路径（用于验证服务端）
+  ssl_verify_peer: false              # 是否验证服务端证书有效性
+  ssl_ciphers: ""                     # 指定加密套件（如 "AES256-SHA"）
+
+  # --- 性能优化配置 ---
+  pipeline_size: 10                   # 管道批量操作的默认大小
+  enable_pipeline: false              # 是否默认启用管道（批量命令优化）
+  max_memory_policy: 0                # 内存淘汰策略（0=默认 noeviction，1=allkeys-lru...）
+  compress_data: false                # 是否压缩存储的数据（节省内存，增加CPU开销）
+
+  # --- 业务缓存 TTL 配置（非驱动层，业务层使用）---
+  cache:
+    default_ttl: 300                  # 默认缓存过期时间（秒）
+    user_info_ttl: 300                # 用户基本信息缓存过期时间（秒）
+    user_profile_ttl: 600             # 用户档案缓存过期时间（秒）
+    user_preferences_ttl: 1800        # 用户偏好设置缓存过期时间（秒）
+
+# ==================== 线程池配置 ====================
+thread_pool:
+  # --- 核心参数 ---
+  core_size: 16                        # 核心线程数（即使空闲也会保留）
+  max_size: 24                        # 最大线程数（任务堆积时可临时扩展至此数量）
+  keep_alive_ms: 60000                # 非核心线程空闲存活时间（毫秒，60秒后回收）
+  queue_capacity: 1024                # 任务队列容量（超过则触发拒绝策略）
+
+  # --- 行为策略 ---
+  allow_core_timeout: false           # 是否允许核心线程超时退出（false=永不退出）
+  rejection_policy: "abort"           # 任务拒绝策略：abort（抛异常）, caller_runs, discard, discard_oldest
+  prestart_core_threads: false        # 是否在启动时预创建所有核心线程（true=立即创建，false=按需创建）
+
+  # --- 线程属性 ---
+  thread_priority: 5                  # 线程优先级（1~10，5=正常，越高CPU调度越频繁）
+  name_prefix: "user-service-"        # 线程名称前缀，便于调试和监控（如 "user-service-1"）
+
+  # --- 监控配置 ---
+  enable_monitoring: false            # 是否启用线程池运行时监控（如队列大小、活跃线程数等）
+  monitoring_interval_ms: 5000        # 监控日志/指标采集间隔（毫秒，5秒）
+  enable_thread_dump: false
+
+# ==================== 服务注册中心配置 ====================
+service_registry:
+  enabled: true                       # 是否启用服务注册
+  host: "127.0.0.1"                   # 服务注册中心地址
+  port: 8090                          # 服务注册中心端口
+  heartbeat_interval_s: 30            # 心跳间隔（秒）
+  register_timeout_s: 10              # 注册超时（秒）
+  request_timeout_ms: 5000            # 请求超时（毫秒）
+  auto_heartbeat: true                # 自动发送心跳
+  auto_reconnect: true                # 自动重新注册
+  reconnect_delay_s: 5                # 重连延迟（秒）
+  # 服务元数据
+  metadata:
+    service_type: "core"              # 服务类型：core, game, gateway
+    region: "cn-east"                 # 区域
+
+# ==================== 用户数据配置 ====================
+user_data:
+  validation:
+    username:
+      min_length: 3
+      max_length: 50
+      pattern: "^[a-zA-Z0-9_-]+$"
+    password:
+      min_length: 8
+      max_length: 128
+      require_uppercase: true
+      require_lowercase: true
+      require_numbers: true
+      require_special_chars: false
+    email:
+      max_length: 255
+      strict_validation: true
+    nickname:
+      min_length: 1
+      max_length: 100
+  defaults:
+    language: "zh-CN"
+    timezone: "Asia/Shanghai"
+    theme: "light"
+    notifications:
+      email: true
+      push: true
+      sms: false
+    session_timeout: 3600
+  limits:
+    max_sessions_per_user: 5
+    session_cleanup_interval: 3600
+
+# ==================== 日志配置 ====================
+logger:
+  console:
+    enabled: true
+  file:
+    enabled: true
+    path: "logs/user_service.log"
+    max_size: 536870912    # 512 * 1024 * 1024 = 512 MB
+    max_files: 5
+  async:
+    enabled: false
+  level: "INFO"
+
+  # ==================== Kafka配置 ====================
+kafka:
+  enable: true                                # 是否启用 Kafka 功能
+  topic_prefix: "game_microservices"          # 主题名称前缀，用于环境/项目隔离
+
+  # ========== Producer 配置 ==========
+  producer:
+    brokers: "172.26.26.199:9092"                     # Kafka 集群地址列表
+    client_id: ""                             # 生产者客户端标识（可空）
+    acks: "all"                               # 确认机制：所有副本写入成功才算成功
+    retries: 3                                # 发送失败时自动重试次数
+    batch_size: 16384                         # 批量发送的消息缓冲大小（字节）
+    linger_ms: 1                              # 批处理等待更多消息的最长时间（毫秒）
+    buffer_memory: 33554432                   # 生产者本地缓存总内存上限（字节）
+    compression_type: "snappy"                  # 消息压缩算法（如 none、gzip、snappy）
+    max_request_size: 1048576                 # 单个请求最大体积（字节）
+    request_timeout_ms: 30000                 # 请求响应超时时间（毫秒）
+    delivery_timeout_ms: 120000               # 消息从发送到确认的总超时时间
+    enable_idempotence: true                  # 启用幂等性，防止重复消息
+    max_in_flight_requests: 5                 # 每个连接最多并发发送请求数
+
+    # 安全配置
+    security_protocol: "PLAINTEXT"            # 安全协议类型（PLAINTEXT/SASL_SSL/SSL）
+    sasl:
+      mechanism: "PLAIN"                      # SASL 认证机制（如 PLAIN, SCRAM）
+      username: ""                            # SASL 认证用户名
+      password: ""                            # SASL 认证密码
+    ssl:
+      ca_location: ""                         # CA 根证书路径（用于验证服务端）
+      certificate_location: ""                # 客户端证书路径（双向认证）
+      key_location: ""                        # 客户端私钥路径
+      key_password: ""                        # 私钥解密密码（如有）
+
+  # ========== Consumer 配置 ==========
+  consumer:
+    brokers: "172.26.26.199:9092"                     # Kafka 集群地址列表
+    group_id: "auth_service_cluster"          # 消费者组 ID，同组共享分区负载
+    client_id: ""                             # 消费者客户端标识（可空）
+    auto_offset_reset: "latest"               # 偏移量无效时从最新消息开始消费
+    enable_auto_commit: true                  # 是否自动提交消费偏移量
+    auto_commit_interval_ms: 1000             # 自动提交偏移量的时间间隔（毫秒）
+    session_timeout_ms: 30000                 # 组会话超时时间，超时则触发 rebalance
+    heartbeat_interval_ms: 10000              # 向协调者发送心跳的间隔（必须 < session_timeout）
+    max_poll_interval_ms: 300000              # 两次 poll 最大间隔，超时视为消费者死亡
+    max_poll_records: 500                     # 每次 poll 返回的最大消息数
+    fetch_min_bytes: 1                        # 最小拉取数据量，达到才返回响应
+    fetch_max_wait_ms: 500                    # 拉取请求最长等待时间（毫秒）
+    max_partition_fetch_bytes: 1048576        # 单个分区单次拉取最大数据量（字节）
+    check_crcs: true                          # 是否校验消息完整性（CRC）
+    isolation_level: "read_uncommitted"       # 读取事务消息级别（未提交或已提交）
+
+    # 安全配置
+    security_protocol: "PLAINTEXT"            # 安全协议类型
+    sasl:
+      mechanism: "PLAIN"                      # SASL 认证机制
+      username: ""                            # SASL 用户名
+      password: ""                            # SASL 密码
+    ssl:
+      ca_location: ""                         # CA 证书路径
+      certificate_location: ""                # 客户端证书路径
+      key_location: ""                        # 客户端私钥路径
+      key_password: ""                        # 私钥密码
+
+# ==================== JWT 认证配置 ====================
+# 注意：此配置必须与 auth_service 中的 JWT 配置保持一致
+jwt:
+  # 此 secret_key 必须与 auth_service_config.yml 中的 jwt.secret_key 完全一致
+  secret_key: "${JWT_SECRET_KEY:game_microservices_jwt_secret_key_2025_very_secure}"
+  issuer: "game-microservices-auth"           # 令牌发行者（必须与 auth_service 一致）
+  audience: "game-microservices-clients"      # 令牌受众
+  algorithm: "HS256"                          # 签名算法
+  clock_skew_seconds: 60                      # 时钟偏差容忍（秒）
+  validate_issuer: true                       # 是否验证发行者
+  validate_audience: false                    # 是否验证受众
+  validate_expiration: true                   # 是否验证过期时间
+
+# ==================== 认证中间件配置 ====================
+auth_middleware:
+  enabled: true                               # 是否启用认证中间件
+  token_header: "Authorization"               # Token 头部名称
+  token_prefix: "Bearer "                     # Token 前缀
+  # 不需要认证的路径（前缀匹配）
+  exclude_paths:
+    - "/health"
+    - "/info"
+    - "/stats"
+    - "/api/v1/service/endpoints"
+    - "/api/v1/user/check-username"
+    - "/api/v1/user/check-email"

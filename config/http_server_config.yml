@@ -1,0 +1,205 @@
+# HTTP服务器配置文件
+# 游戏微服务系统 - HTTP模块配置
+
+# ==================== HTTP服务器基础配置 ====================
+http:
+  server:
+    # 网络配置
+    host: "0.0.0.0"                    # 监听地址，0.0.0.0表示监听所有接口
+    port: 8081                         # 监听端口
+    backlog: 1024                      # 监听队列长度
+    reuse_addr: true                   # 启用地址重用
+    reuse_port: false                  # 启用端口重用（Linux 3.9+）
+    
+    # HTTP协议配置
+    max_request_size: 1048576          # 最大请求大小（1MB）
+    max_header_size: 8192              # 最大头部大小（8KB）
+    request_timeout_ms: 30000          # 请求超时时间（30秒）
+    keep_alive_timeout_ms: 60000       # Keep-Alive超时时间（60秒）
+    max_keep_alive_requests: 100       # 单连接最大请求数
+    
+    # 线程池配置
+    worker_threads: 0                  # 工作线程数（0=自动检测CPU核心数）
+    io_threads: 1                      # IO线程数
+    enable_thread_pool: true           # 启用线程池
+    
+    # 性能优化配置
+    enable_tcp_nodelay: true           # 禁用Nagle算法
+    enable_so_reuseaddr: true          # SO_REUSEADDR选项
+    send_buffer_size: 65536            # 发送缓冲区大小（64KB）
+    recv_buffer_size: 65536            # 接收缓冲区大小（64KB）
+    
+    # 安全配置
+    enable_cors: true                  # 启用CORS
+    cors_origin: "*"                   # CORS允许的源
+    cors_methods:                      # CORS允许的方法
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "OPTIONS"
+      - "HEAD"
+    cors_headers:                      # CORS允许的头部
+      - "Content-Type"
+      - "Authorization"
+      - "X-Requested-With"
+      - "Accept"
+      - "Origin"
+    
+    # 日志和监控配置
+    enable_access_log: true            # 启用访问日志
+    enable_error_log: true             # 启用错误日志
+    enable_performance_monitoring: true # 启用性能监控
+    stats_interval_ms: 5000            # 统计间隔（5秒）
+
+# ==================== 路由配置 ====================
+routes:
+  # API路由配置
+  api:
+    prefix: "/api/v1"                  # API路径前缀
+    enable_versioning: true            # 启用版本控制
+    default_version: "v1"              # 默认版本
+    
+    # 认证配置
+    auth:
+      enable: true                     # 启用认证
+      token_header: "Authorization"    # 认证头部名称
+      token_prefix: "Bearer "          # Token前缀
+      secret_key: "your_secret_key_here" # JWT密钥
+      token_expiry_hours: 24           # Token过期时间（小时）
+    
+    # 限流配置
+    rate_limit:
+      enable: true                     # 启用限流
+      requests_per_minute: 60          # 每分钟请求数限制
+      burst_size: 10                   # 突发请求数
+      
+  # 静态文件配置
+  static:
+    enable: true                       # 启用静态文件服务
+    path_prefix: "/static"             # URL路径前缀
+    root_directory: "./public"         # 本地根目录
+    index_files:                       # 默认索引文件
+      - "index.html"
+      - "index.htm"
+    cache_max_age: 3600                # 缓存时间（秒）
+    enable_gzip: true                  # 启用Gzip压缩
+    
+  # 健康检查配置
+  health:
+    path: "/health"                    # 健康检查路径
+    enable_detailed: true              # 启用详细健康信息
+    check_database: true               # 检查数据库连接
+    check_redis: true                  # 检查Redis连接
+    check_external_services: false    # 检查外部服务
+
+# ==================== 中间件配置 ====================
+middleware:
+  # 日志中间件
+  logging:
+    enable: true                       # 启用请求日志
+    log_level: "INFO"                  # 日志级别
+    include_headers: false             # 是否包含请求头
+    include_body: false                # 是否包含请求体
+    exclude_paths:                     # 排除的路径
+      - "/health"
+      - "/metrics"
+    
+  # CORS中间件
+  cors:
+    enable: true                       # 启用CORS中间件
+    allow_credentials: false           # 允许凭据
+    max_age: 86400                     # 预检请求缓存时间（秒）
+    
+  # 压缩中间件
+  compression:
+    enable: true                       # 启用响应压缩
+    level: 6                           # 压缩级别（1-9）
+    min_size: 1024                     # 最小压缩大小（字节）
+    types:                             # 压缩的MIME类型
+      - "text/html"
+      - "text/css"
+      - "text/javascript"
+      - "application/json"
+      - "application/xml"
+    
+  # 安全中间件
+  security:
+    enable: true                       # 启用安全中间件
+    hsts_max_age: 31536000            # HSTS最大年龄（秒）
+    content_type_nosniff: true         # X-Content-Type-Options
+    frame_options: "DENY"              # X-Frame-Options
+    xss_protection: "1; mode=block"    # X-XSS-Protection
+
+# ==================== SSL/TLS配置 ====================
+ssl:
+  enable: false                        # 启用SSL/TLS
+  port: 8443                          # HTTPS端口
+  cert_file: "certs/server.crt"       # 证书文件路径
+  key_file: "certs/server.key"        # 私钥文件路径
+  ca_file: ""                         # CA证书文件路径
+  protocols:                          # 支持的协议版本
+    - "TLSv1.2"
+    - "TLSv1.3"
+  ciphers: "ECDHE+AESGCM:ECDHE+CHACHA20:DHE+AESGCM:DHE+CHACHA20:!aNULL:!MD5:!DSS"
+
+# ==================== 数据库集成配置 ====================
+database:
+  mysql:
+    enable: true                       # 启用MySQL集成
+    connection_pool_size: 10           # 连接池大小
+    
+  redis:
+    enable: true                       # 启用Redis集成
+    connection_pool_size: 5            # 连接池大小
+
+# ==================== 监控和指标配置 ====================
+monitoring:
+  # Prometheus指标
+  prometheus:
+    enable: true                       # 启用Prometheus指标
+    path: "/metrics"                   # 指标路径
+    namespace: "http_server"           # 指标命名空间
+    
+  # 健康检查
+  health_check:
+    interval_seconds: 30               # 健康检查间隔
+    timeout_seconds: 5                 # 健康检查超时
+    
+  # 性能指标
+  performance:
+    enable_request_timing: true        # 启用请求计时
+    enable_memory_stats: true          # 启用内存统计
+    enable_connection_stats: true      # 启用连接统计
+
+# ==================== 开发和调试配置 ====================
+development:
+  enable_debug_mode: false             # 启用调试模式
+  enable_hot_reload: false             # 启用热重载
+  enable_request_dump: false           # 启用请求转储
+  enable_response_dump: false          # 启用响应转储
+  
+  # 测试配置
+  testing:
+    enable_test_endpoints: false       # 启用测试端点
+    test_data_path: "test_data/"       # 测试数据路径
+
+# ==================== 生产环境配置 ====================
+production:
+  # 优化配置
+  optimization:
+    enable_connection_pooling: true    # 启用连接池
+    enable_keep_alive: true            # 启用Keep-Alive
+    enable_response_caching: true      # 启用响应缓存
+    
+  # 安全配置
+  security:
+    hide_server_header: true           # 隐藏服务器头部
+    enable_request_validation: true    # 启用请求验证
+    max_request_rate: 1000             # 最大请求速率（每秒）
+    
+  # 资源限制
+  limits:
+    max_concurrent_connections: 10000  # 最大并发连接数
+    max_memory_usage_mb: 1024          # 最大内存使用（MB）
+    max_cpu_usage_percent: 80          # 最大CPU使用率（%）

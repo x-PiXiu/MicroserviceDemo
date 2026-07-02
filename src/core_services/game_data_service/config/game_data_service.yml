@@ -1,0 +1,311 @@
+# =============================================================================
+# 游戏数据服务配置文件 - 重构版本
+# 版本: 1.0.0
+# 日期: 2025-09-20
+# 说明: 基于http_config.yml格式的统一配置结构
+# =============================================================================
+
+# ==================== 服务基础配置 ====================
+service:
+  name: "game_data_service"
+  version: "1.0.0"
+  description: "游戏数据服务 - 管理跨游戏数据"
+  environment: "development"
+
+# ==================== 网络配置 ====================
+network:
+  host: "0.0.0.0"
+  port: 8083
+  worker_threads: 4
+  max_connections: 1000
+  keep_alive_timeout: 30
+  read_timeout: 30
+  write_timeout: 30
+  backlog: 1024
+  reuse_address: true
+  tcp_no_delay: true
+
+# ==================== 数据库配置 ====================
+database:
+  mysql:
+    host: "localhost"
+    port: 3306
+    username: "gameuser"
+    password: "gamepass123"
+    database: "game_service_db"
+    charset: "utf8mb4"
+    pool:
+      initial_size: 5
+      max_size: 20
+      min_size: 2
+      max_idle: 10
+      max_wait_time: 5000
+      validation_query: "SELECT 1"
+      test_on_borrow: true
+      test_on_return: false
+      test_while_idle: true
+    connection:
+      timeout: 5000
+      auto_reconnect: true
+      max_reconnect_count: 3
+      reconnect_interval: 1000
+
+# ==================== Redis配置 ====================
+redis:
+  host: "localhost"
+  port: 6379
+  password: "redis123456"
+  database: 4
+  pool:
+    max_total: 20
+    max_idle: 10
+    min_idle: 2
+    max_wait_millis: 5000
+    test_on_borrow: true
+    test_on_return: false
+    test_while_idle: true
+  timeout:
+    connection: 2000
+    socket: 3000
+  cache:
+    default_ttl: 300
+    game_profile_ttl: 300
+    achievement_ttl: 1800
+    inventory_ttl: 600
+    currency_ttl: 180
+    leaderboard_ttl: 600
+
+# ==================== 线程池配置 ====================
+thread_pool:
+  core_pool_size: 4
+  maximum_pool_size: 16
+  keep_alive_time_ms: 60000
+  queue_capacity: 1024
+  allow_core_thread_timeout: false
+  rejection_policy: "abort"
+  thread_name_prefix: "game-data-"
+
+# ==================== API网关配置 ====================
+api_gateway:
+  enabled: false
+  url: "http://localhost:8081"
+  endpoints:
+    register: "/api/v1/services/register"
+    unregister: "/api/v1/services/unregister"
+    heartbeat: "/api/v1/services/heartbeat"
+  registration:
+    service_id: "game-data-service-001"
+    service_name: "game_data_service"
+    service_version: "1.0.0"
+    health_check_url: "/api/v1/gamedata/health"
+    tags: ["game", "data", "microservice"]
+    metadata:
+      team: "core-services"
+      maintainer: "game-microservices-team"
+  heartbeat:
+    interval: 30
+    timeout: 5
+    retry_count: 3
+
+# ==================== 安全配置 ====================
+security:
+  authentication:
+    enabled: true
+    token_verification_url: "http://localhost:8008/api/v1/auth/validate"
+    cache_tokens: true
+    token_cache_ttl: 300
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 2000
+    requests_per_hour: 20000
+    burst_size: 200
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Content-Type", "Authorization", "X-Requested-With"]
+    max_age: 3600
+
+# ==================== 游戏数据配置 ====================
+game_data:
+  games:
+    - id: 1
+      name: "gomoku"
+      display_name: "五子棋"
+      initial_rating: 1200
+      max_rating: 3000
+      min_rating: 100
+    - id: 2
+      name: "snake"
+      display_name: "贪吃蛇"
+      initial_rating: 1000
+      max_rating: 5000
+      min_rating: 0
+  rating:
+    elo_k_factor: 32
+    rating_floor: 100
+    provisional_games: 10
+  experience:
+    base_exp_per_game: 10
+    win_bonus_multiplier: 2.0
+    loss_penalty: 0.5
+    draw_multiplier: 1.0
+    max_level: 100
+    exp_formula: "quadratic"
+  currency:
+    default_gold: 1000
+    default_gems: 10
+    max_gold: 999999999
+    max_gems: 99999
+  inventory:
+    max_items_per_type: 999
+    auto_cleanup_expired: true
+    cleanup_interval_hours: 24
+
+# ==================== 成就系统配置 ====================
+achievements:
+  enabled: true
+  auto_unlock: true
+  notification_enabled: true
+  categories:
+    - "gameplay"
+    - "progression"
+    - "social"
+    - "special"
+  rarity_multipliers:
+    common: 1.0
+    rare: 1.5
+    epic: 2.0
+    legendary: 3.0
+  unlock_rewards:
+    common: 10
+    rare: 25
+    epic: 50
+    legendary: 100
+
+# ==================== 排行榜配置 ====================
+leaderboards:
+  enabled: true
+  types:
+    - "rating"
+    - "wins"
+    - "playtime"
+    - "win_streak"
+  update_frequency: 300
+  max_entries: 1000
+  cache_duration: 600
+  seasons:
+    enabled: true
+    current_season: "season_2025_1"
+    season_duration_days: 90
+
+# ==================== 日志配置 ====================
+logging:
+  level: "INFO"
+  format: "json"
+  output: "both"
+  file:
+    path: "/var/log/game-microservices/game-data-service.log"
+    max_size: "100MB"
+    max_files: 10
+    compress: true
+  components:
+    database: "INFO"
+    cache: "INFO"
+    http: "INFO"
+    achievements: "DEBUG"
+    leaderboard: "INFO"
+    business: "INFO"
+
+# ==================== 监控配置 ====================
+monitoring:
+  enabled: true
+  metrics:
+    enabled: true
+    port: 9083
+    path: "/metrics"
+  health_check:
+    enabled: true
+    path: "/api/v1/gamedata/health"
+    interval: 30
+    timeout: 5
+  performance:
+    track_requests: true
+    track_database_queries: true
+    track_cache_operations: true
+    slow_query_threshold: 1000
+
+# ==================== 业务配置 ====================
+business:
+  game_results:
+    auto_process_rewards: true
+    auto_update_achievements: true
+    auto_update_leaderboards: true
+    batch_processing: true
+    batch_size: 100
+  currency_operations:
+    enable_transaction_log: true
+    max_single_transaction: 1000000
+    daily_earn_limit: 100000
+    fraud_detection: true
+  inventory_management:
+    auto_stack_items: true
+    auto_remove_expired: true
+    max_unique_items: 1000
+  social_features:
+    friend_requests: true
+    leaderboard_sharing: true
+    achievement_sharing: true
+
+# ==================== 外部服务配置 ====================
+external_services:
+  user_service_url: "http://127.0.0.1:8082"
+
+# ==================== 环境配置 ====================
+development:
+  debug_mode: true
+  mock_external_services: false
+  enable_cors: true
+  log_all_requests: true
+  database:
+    show_sql: true
+    log_slow_queries: true
+  cache:
+    disable_for_testing: false
+  achievements:
+    instant_unlock: false
+
+testing:
+  debug_mode: false
+  database:
+    use_test_db: true
+    reset_data_on_start: true
+  cache:
+    use_memory_cache: true
+  external_services:
+    mock_auth_service: true
+    mock_user_service: false
+    user_service_url: "http://127.0.0.1:8082"
+  achievements:
+    fast_unlock: true
+
+production:
+  debug_mode: false
+  security:
+    enforce_https: true
+    strict_cors: true
+    enable_audit_log: true
+  database:
+    use_read_replicas: true
+    enable_connection_pooling: true
+    enable_partitioning: true
+  cache:
+    enable_clustering: true
+    backup_enabled: true
+  monitoring:
+    alert_on_errors: true
+    alert_on_high_latency: true
+    performance_tracking: true
+  leaderboards:
+    real_time_updates: true
+    distributed_calculation: true

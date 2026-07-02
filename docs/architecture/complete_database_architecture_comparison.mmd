@@ -1,0 +1,112 @@
+
+​        
+```mermaid
+graph TB
+    subgraph "❌ 当前架构（存在问题）"
+        subgraph "🔐 认证服务"
+            AuthDB1[(game_microservices)]
+            AuthTables1["users, game_user_data<br/>user_sessions, game_servers"]
+        end    
+    subgraph "🎯 五子棋服务"  
+        GomokuDB1[(gomoku_game_db)]
+        GomokuTables1["gomoku_users ❌重复<br/>gomoku_games, gomoku_moves"]
+    end
+    
+    subgraph "🐍 贪吃蛇服务"
+        SnakeDB1[(snake_game_db)]
+        SnakeTables1["snake_users ❌重复<br/>snake_games, snake_scores"]
+    end
+    
+    User1[👤 用户] -.-> AuthDB1
+    User1 -.-> GomokuDB1
+    User1 -.-> SnakeDB1
+    
+    Problem1[❌ 数据重复存储<br/>❌ 同步困难<br/>❌ 一致性风险]
+end
+
+subgraph "✅ 推荐架构（解决问题）"
+    subgraph "👤 用户核心服务"
+        UserDB2[(user_service_db)]
+        UserTables2["users, user_profiles<br/>user_sessions, user_preferences"]
+    end
+    
+    subgraph "🎮 游戏数据服务"
+        GameDB2[(game_service_db)]
+        GameTables2["user_game_profiles<br/>game_achievements<br/>user_inventory, user_currency"]
+    end
+    
+    subgraph "🎯 五子棋业务"
+        GomokuDB2[(gomoku_business_db)]
+        GomokuTables2["gomoku_games<br/>gomoku_moves<br/>gomoku_tournaments"]
+    end
+    
+    subgraph "🐍 贪吃蛇业务"
+        SnakeDB2[(snake_business_db)]
+        SnakeTables2["snake_games<br/>snake_levels<br/>snake_challenges"]
+    end
+    
+    User2[👤 用户] -.-> UserDB2
+    UserDB2 -.-> GameDB2
+    GameDB2 -.-> GomokuDB2
+    GameDB2 -.-> SnakeDB2
+    
+    Solution1[✅ 单一数据源<br/>✅ 自动同步<br/>✅ 强一致性]
+end
+
+classDef problemStyle fill:#ffebee,stroke:#f44336,stroke-width:2px;
+classDef solutionStyle fill:#e8f5e8,stroke:#4caf50,stroke-width:2px;
+
+class AuthDB1,GomokuDB1,SnakeDB1,Problem1 problemStyle;
+class UserDB2,GameDB2,GomokuDB2,SnakeDB2,Solution1 solutionStyle;
+```
+
+
+
+```mermaid
+graph TB
+    subgraph "🎯 游戏服务层"
+        Gomoku[五子棋服务<br/>:8084]
+        Snake[贪吃蛇服务<br/>:8085]
+    end
+    
+    subgraph "💾 数据服务层"  
+        UserSvc[👤 用户服务<br/>:8082]
+        GameDataSvc[🎮 游戏数据服务<br/>:8083]
+        AuthSvc[🔐 认证服务<br/>:8008]
+    end
+    
+    subgraph "🗄️ 数据库层"
+        UserDB[(user_service_db)]
+        GameDB[(game_service_db)]  
+        GomokuDB[(gomoku_business_db)]
+    end
+    
+    subgraph "🌐 接入层"
+        Gateway[API网关:8081]
+        Client[🖥️ 客户端]
+    end
+    
+    %% 数据流向
+    Client --> Gateway
+    Gateway --> AuthSvc
+    Gateway --> Gomoku
+    
+    %% 认证流程
+    AuthSvc -.->|获取用户信息| UserSvc
+    
+    %% 游戏数据流程
+    Gomoku -.->|用户信息| UserSvc
+    Gomoku -.->|游戏数据| GameDataSvc
+    Gomoku --> GomokuDB
+    
+    %% 数据库连接
+    UserSvc --> UserDB
+    GameDataSvc --> GameDB
+    
+    %% 数据流标注
+    Gomoku -.->|1.用户档案查询| UserSvc
+    Gomoku -.->|2.游戏结果更新| GameDataSvc
+    Gomoku -.->|3.成就检查| GameDataSvc
+    Gomoku -.->|4.排行榜更新| GameDataSvc
+```
+

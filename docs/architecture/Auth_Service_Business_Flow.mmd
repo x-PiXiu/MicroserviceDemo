@@ -1,0 +1,648 @@
+# 认证核心服务业务流程图
+
+## 1. 认证服务整体架构图
+
+```mermaid
+graph TB
+    %% 外部系统
+    Client[客户端应用]
+    Gateway[API网关<br/>8080]
+    
+    %% 认证服务核心
+    subgraph AuthService["认证核心服务 (8008)"]
+        direction TB
+        HTTP[HTTP服务器]
+        Controller[控制器层]
+        JwtMgr[JWT管理器]
+        SessionMgr[会话管理器]
+        PasswordMgr[密码管理器]
+        UserClient[用户服务客户端]
+        EventLoop[事件循环<br/>时间轮调度器]
+        ThreadPool[线程池]
+    end
+    
+    %% 认证专用数据库
+    AuthMySQL[(MySQL数据库<br/>auth_sessions_db)]
+    AuthRedis[(Redis缓存<br/>认证数据)]
+    
+    %% 其他微服务
+    UserSvc[用户服务<br/>8082]
+    GameSvc[游戏服务<br/>8084]
+    
+    %% 连接关系
+    Client -->|认证请求| Gateway
+    Gateway -->|路由转发| HTTP
+    HTTP --> Controller
+    Controller --> JwtMgr
+    Controller --> SessionMgr
+    Controller --> PasswordMgr
+    Controller --> UserClient
+    
+    %% 数据存储
+    JwtMgr --> AuthRedis
+    SessionMgr --> AuthMySQL
+    SessionMgr --> AuthRedis
+    UserClient --> AuthRedis
+    
+    %% 服务间通信
+    UserClient -->|用户验证/创建| UserSvc
+    Gateway <-.->|服务注册/心跳| EventLoop
+    GameSvc -.->|令牌验证| HTTP
+    
+    %% 定时任务
+    EventLoop -.->|会话清理| SessionMgr
+    EventLoop -.->|令牌清理| JwtMgr
+    EventLoop -.->|心跳发送| Gateway
+    
+    %% 线程池支持
+    ThreadPool -.-> HTTP
+    ThreadPool -.-> EventLoop
+    ThreadPool -.-> UserClient
+    
+    %% 样式
+    classDef serviceClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef dbClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef externalClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef coreClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    
+    class AuthService serviceClass
+    class AuthMySQL,AuthRedis dbClass
+    class Client,Gateway,UserSvc,GameSvc externalClass
+    class JwtMgr,SessionMgr,PasswordMgr,UserClient coreClass
+```
+
+## 2. 认证服务启动流程图
+
+```mermaid
+flowchart TD
+    Start([服务启动]) --> LoadConfig[加载配置文件]
+    LoadConfig --> ValidateConfig{配置验证}
+    ValidateConfig -->|失败| Error[启动失败]
+    ValidateConfig -->|成功| InitAuthDB[初始化认证专用数据库]
+    
+    InitAuthDB --> TestMySQL{测试MySQL连接}
+    TestMySQL -->|失败| Error
+    TestMySQL -->|成功| TestRedis{测试Redis连接}
+    TestRedis -->|失败| Error
+    TestRedis -->|成功| InitSchema[初始化数据库表结构]
+    
+    InitSchema --> InitUserClient[初始化用户服务客户端]
+    InitUserClient --> TestUserSvc{测试用户服务连接}
+    TestUserSvc -->|失败| Warning1[记录警告,继续启动]
+    TestUserSvc -->|成功| InitBusiness[初始化业务组件]
+    Warning1 --> InitBusiness
+    
+    InitBusiness --> InitJWT[初始化JWT管理器]
+    InitJWT --> InitPassword[初始化密码管理器]
+    InitPassword --> InitSession[初始化会话管理器]
+    InitSession --> InitThreadPool[初始化线程池]
+    
+    InitThreadPool --> InitHTTP[初始化HTTP服务器]
+    InitHTTP --> SetupRoutes[设置认证路由]
+    SetupRoutes --> StartHTTP{启动HTTP服务器}
+    StartHTTP -->|失败| Error
+    StartHTTP -->|成功| InitEventLoop[初始化事件循环]
+    
+    InitEventLoop --> StartEventLoop{启动时间轮调度器}
+    StartEventLoop -->|失败| Error
+    StartEventLoop -->|成功| DelayedTasks[延迟启动任务<br/>3秒后执行]
+    
+    DelayedTasks --> SetupTimers[设置定时任务]
+    SetupTimers --> Task1[会话清理任务<br/>每5分钟]
+    SetupTimers --> Task2[令牌清理任务<br/>每10分钟]
+    SetupTimers --> Task3[心跳任务<br/>每30秒]
+    
+    Task1 --> RegisterGateway[注册到API网关]
+    Task2 --> RegisterGateway
+    Task3 --> RegisterGateway
+    
+    RegisterGateway --> GatewayReg{网关注册}
+    GatewayReg -->|失败| Warning2[记录警告,继续运行]
+    GatewayReg -->|成功| Success[认证服务启动成功]
+    Warning2 --> Success
+    
+    Success --> Running[服务运行中<br/>等待认证请求]
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef decisionClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef warningClass fill:#fce4ec,stroke:#ad1457,stroke-width:2px
+    
+    class LoadConfig,InitAuthDB,InitSchema,InitUserClient,InitBusiness,InitJWT,InitPassword,InitSession,InitThreadPool,InitHTTP,SetupRoutes,InitEventLoop,SetupTimers,RegisterGateway processClass
+    class ValidateConfig,TestMySQL,TestRedis,TestUserSvc,StartHTTP,StartEventLoop,GatewayReg decisionClass
+    class Error errorClass
+    class Success,Running successClass
+    class Warning1,Warning2 warningClass
+```
+
+## 3. 用户认证业务流程图
+
+```mermaid
+sequenceDiagram
+    participant Client as 客户端
+    participant Gateway as API网关
+    participant AuthSvc as 认证服务
+    participant UserClient as 用户服务客户端
+    participant UserSvc as 用户服务
+    participant JwtMgr as JWT管理器
+    participant SessionMgr as 会话管理器
+    participant AuthDB as 认证数据库
+    participant Cache as Redis缓存
+    
+    Note over Client, Cache: 用户注册流程
+    Client->>Gateway: POST /api/v1/auth/register
+    Gateway->>AuthSvc: 转发注册请求
+    AuthSvc->>AuthSvc: 解析JSON数据
+    AuthSvc->>UserClient: 检查用户名存在性
+    UserClient->>UserSvc: GET /api/v1/users/by-username
+    UserSvc-->>UserClient: 用户名检查结果
+    UserClient-->>AuthSvc: 返回检查结果
+    AuthSvc->>UserClient: 检查邮箱存在性
+    UserClient->>UserSvc: GET /api/v1/users/by-email
+    UserSvc-->>UserClient: 邮箱检查结果
+    UserClient-->>AuthSvc: 返回检查结果
+    AuthSvc->>AuthSvc: 验证密码强度
+    AuthSvc->>UserClient: 创建用户
+    UserClient->>UserSvc: POST /api/v1/users
+    UserSvc-->>UserClient: 用户创建结果
+    UserClient-->>AuthSvc: 返回用户ID
+    AuthSvc-->>Gateway: 注册成功响应
+    Gateway-->>Client: 201 Created + 用户ID
+    
+    Note over Client, Cache: 用户登录流程
+    Client->>Gateway: POST /api/v1/auth/login
+    Gateway->>AuthSvc: 转发登录请求
+    AuthSvc->>UserClient: 验证用户身份
+    UserClient->>Cache: 查询用户缓存
+    Cache-->>UserClient: 缓存未命中
+    UserClient->>UserSvc: GET /api/v1/users/by-username
+    UserSvc-->>UserClient: 返回用户信息
+    UserClient->>Cache: 缓存用户信息
+    UserClient-->>AuthSvc: 返回用户数据
+    AuthSvc->>AuthSvc: 验证密码
+    AuthSvc->>SessionMgr: 创建登录会话
+    SessionMgr->>AuthDB: 插入会话记录
+    AuthDB-->>SessionMgr: 会话创建成功
+    SessionMgr-->>AuthSvc: 返回会话信息
+    AuthSvc->>JwtMgr: 生成JWT令牌
+    JwtMgr->>Cache: 缓存令牌信息
+    JwtMgr-->>AuthSvc: 返回令牌对
+    AuthSvc-->>Gateway: 登录成功响应
+    Gateway-->>Client: 200 OK + JWT Tokens
+    
+    Note over Client, Cache: 令牌验证流程
+    Client->>Gateway: 请求受保护资源 (携带Authorization头)
+    Gateway->>AuthSvc: POST /api/v1/auth/validate (转发Authorization头)
+    AuthSvc->>JwtMgr: 验证Access Token
+    JwtMgr->>Cache: 检查令牌黑名单
+    Cache-->>JwtMgr: 令牌状态
+    JwtMgr->>JwtMgr: 验证令牌签名和有效期
+    JwtMgr-->>AuthSvc: 返回验证结果
+    AuthSvc-->>Gateway: 令牌验证响应
+    Gateway-->>Client: 继续处理请求或拒绝访问
+```
+
+## 4. 服务间通信流程图
+
+```mermaid
+sequenceDiagram
+    participant AuthSvc as 认证服务
+    participant Gateway as API网关
+    participant UserSvc as 用户服务
+    participant GameSvc as 游戏服务
+    participant EventLoop as 事件循环
+    
+    Note over AuthSvc, GameSvc: 服务启动注册流程
+    AuthSvc->>AuthSvc: 服务启动完成
+    AuthSvc->>Gateway: POST /api/v1/services/register
+    Note right of AuthSvc: 注册数据包含:<br/>- service_name: auth_service<br/>- host: 0.0.0.0, port: 8008<br/>- health_check_path: /api/v1/health<br/>- api_endpoints列表
+    Gateway-->>AuthSvc: 注册成功确认
+    
+    Note over AuthSvc, GameSvc: 用户服务集成流程
+    AuthSvc->>UserSvc: 用户验证请求
+    Note right of AuthSvc: 通过UserServiceClient:<br/>- getUserByUsername<br/>- getUserByEmail<br/>- createUser<br/>- isUsernameExists
+    UserSvc-->>AuthSvc: 用户数据响应
+    AuthSvc->>AuthSvc: 缓存用户信息到Redis
+    
+    Note over AuthSvc, GameSvc: 定时心跳流程
+    loop 每30秒
+        EventLoop->>Gateway: POST /api/v1/services/heartbeat
+        Note right of EventLoop: 心跳数据包含:<br/>- service_name: auth_service<br/>- status: healthy<br/>- metadata(组件状态)<br/>- metrics(认证统计)
+        Gateway-->>EventLoop: 心跳确认
+    end
+    
+    Note over AuthSvc, GameSvc: 认证服务调用流程
+    GameSvc->>Gateway: 需要用户认证的请求
+    Gateway->>AuthSvc: POST /api/v1/auth/validate
+    Note right of Gateway: 验证用户JWT令牌
+    AuthSvc->>AuthSvc: 验证令牌有效性
+    AuthSvc-->>Gateway: 令牌验证结果
+    Gateway-->>GameSvc: 允许访问或拒绝请求
+    
+    Note over AuthSvc, GameSvc: 健康检查流程
+    Gateway->>AuthSvc: GET /api/v1/health
+    AuthSvc->>AuthSvc: 检查组件状态
+    Note right of AuthSvc: 检查:<br/>- MySQL连接池<br/>- Redis连接池<br/>- 用户服务连接<br/>- HTTP服务器<br/>- 事件循环
+    AuthSvc-->>Gateway: 健康状态响应
+    
+    Note over AuthSvc, GameSvc: 服务发现流程
+    Gateway->>AuthSvc: GET /api/v1/service/endpoints
+    AuthSvc-->>Gateway: 认证服务端点列表
+    Note right of AuthSvc: 包含所有认证API<br/>和服务能力信息
+```
+
+## 5. 定时任务执行流程图
+
+```mermaid
+flowchart TD
+    subgraph TimingWheel[时间轮调度器]
+        direction TB
+        EventLoop[HierarchicalTimingWheel<br/>层次化时间轮]
+        TaskQueue[任务队列]
+        Executor[任务执行器]
+    end
+    
+    subgraph AuthTasks[认证服务定时任务]
+        direction TB
+        SessionCleanup[会话清理任务<br/>每5分钟执行]
+        TokenCleanup[令牌清理任务<br/>每10分钟执行]  
+        HeartbeatTask[心跳任务<br/>每30秒执行]
+        StatsCollection[统计收集任务<br/>每小时执行]
+    end
+    
+    Start([事件循环启动]) --> EventLoop
+    EventLoop --> TaskQueue
+    TaskQueue --> Executor
+    
+    %% 任务注册
+    SessionCleanup --> EventLoop
+    TokenCleanup --> EventLoop
+    HeartbeatTask --> EventLoop
+    StatsCollection --> EventLoop
+    
+    %% 会话清理任务流程
+    Executor -->|执行| SessionExec[会话清理执行]
+    SessionExec --> GetExpiredSessions[查找过期会话]
+    GetExpiredSessions --> RemoveSessions[删除过期会话]
+    RemoveSessions --> ClearSessionCache[清理会话缓存]
+    ClearSessionCache --> LogSessionCleanup[记录清理日志]
+    LogSessionCleanup --> SessionComplete[会话清理完成]
+    
+    %% 令牌清理任务流程
+    Executor -->|执行| TokenExec[令牌清理执行]
+    TokenExec --> GetExpiredTokens[查找过期令牌]
+    GetExpiredTokens --> RemoveTokens[删除过期令牌]
+    RemoveTokens --> UpdateBlacklist[更新令牌黑名单]
+    UpdateBlacklist --> ClearTokenCache[清理令牌缓存]
+    ClearTokenCache --> LogTokenCleanup[记录清理日志]
+    LogTokenCleanup --> TokenComplete[令牌清理完成]
+    
+    %% 心跳任务流程
+    Executor -->|执行| HeartbeatExec[心跳任务执行]
+    HeartbeatExec --> BuildHeartbeatData[构建心跳数据]
+    BuildHeartbeatData --> IncludeAuthStats[包含认证统计]
+    IncludeAuthStats --> SendToGateway[发送到API网关]
+    SendToGateway --> HeartbeatResp{心跳响应}
+    HeartbeatResp -->|成功| LogHeartbeatSuccess[记录心跳成功]
+    HeartbeatResp -->|失败| LogHeartbeatFailure[记录心跳失败]
+    LogHeartbeatSuccess --> HeartbeatComplete[心跳完成]
+    LogHeartbeatFailure --> HeartbeatComplete
+    
+    %% 统计收集任务流程
+    Executor -->|执行| StatsExec[统计收集执行]
+    StatsExec --> CollectAuthStats[收集认证统计]
+    CollectAuthStats --> CollectSessionStats[收集会话统计]
+    CollectSessionStats --> CollectTokenStats[收集令牌统计]
+    CollectTokenStats --> CollectUserServiceStats[收集用户服务统计]
+    CollectUserServiceStats --> UpdateMetrics[更新性能指标]
+    UpdateMetrics --> LogStatsUpdate[记录统计更新]
+    LogStatsUpdate --> StatsComplete[统计收集完成]
+    
+    %% 任务重新调度
+    SessionComplete --> RescheduleSession[重新调度会话清理]
+    TokenComplete --> RescheduleToken[重新调度令牌清理]
+    HeartbeatComplete --> RescheduleHeartbeat[重新调度心跳任务]
+    StatsComplete --> RescheduleStats[重新调度统计收集]
+    
+    RescheduleSession --> TaskQueue
+    RescheduleToken --> TaskQueue
+    RescheduleHeartbeat --> TaskQueue
+    RescheduleStats --> TaskQueue
+    
+    %% 样式
+    classDef taskClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef execClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef checkClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef completeClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    
+    class SessionCleanup,TokenCleanup,HeartbeatTask,StatsCollection taskClass
+    class SessionExec,TokenExec,HeartbeatExec,StatsExec execClass
+    class HeartbeatResp checkClass
+    class SessionComplete,TokenComplete,HeartbeatComplete,StatsComplete completeClass
+```
+
+## 6. 数据流向图
+
+```mermaid
+flowchart LR
+    subgraph External[外部系统]
+        direction TB
+        WebApp[Web应用]
+        MobileApp[移动应用]
+        OtherSvc[其他微服务]
+    end
+    
+    subgraph Gateway[API网关层]
+        Router[路由器]
+        AuthMiddleware[认证中间件]
+        RateLimit[限流器]
+    end
+    
+    subgraph AuthService[认证服务层]
+        direction TB
+        AuthController[认证控制器]
+        JwtValidator[JWT验证器]
+        AuthBusiness[认证业务逻辑]
+        UserServiceClient[用户服务客户端]
+        AuthCache[认证缓存层]
+        AuthPersistence[认证持久化层]
+    end
+    
+    subgraph Storage[存储层]
+        direction TB
+        AuthMySQL[(认证数据库)]
+        AuthRedis[(认证缓存)]
+        UserService[(用户服务)]
+    end
+    
+    subgraph Monitoring[监控层]
+        direction TB
+        AuthMetrics[认证指标收集]
+        AuthLogs[认证日志系统]
+        HealthCheck[健康检查]
+    end
+    
+    %% 数据流向
+    External --> Gateway
+    Gateway --> AuthService
+    AuthService --> Storage
+    AuthService --> Monitoring
+    
+    %% 详细流向
+    WebApp -->|用户登录/注册| Router
+    MobileApp -->|令牌刷新/验证| Router
+    OtherSvc -->|令牌验证请求| Router
+    
+    Router --> AuthMiddleware
+    AuthMiddleware --> RateLimit
+    RateLimit --> AuthController
+    
+    AuthController --> JwtValidator
+    JwtValidator --> AuthBusiness
+    AuthBusiness --> UserServiceClient
+    AuthBusiness --> AuthCache
+    AuthCache -->|缓存未命中| AuthPersistence
+    AuthPersistence --> AuthMySQL
+    AuthBusiness --> AuthRedis
+    UserServiceClient --> UserService
+    
+    AuthController --> AuthMetrics
+    AuthBusiness --> AuthLogs
+    AuthPersistence --> HealthCheck
+    
+    %% 反向数据流
+    AuthMySQL -.->|认证数据| AuthPersistence
+    AuthRedis -.->|缓存数据| AuthCache
+    UserService -.->|用户数据| UserServiceClient
+    AuthPersistence -.->|业务数据| AuthBusiness
+    AuthBusiness -.->|JWT令牌| AuthController
+    AuthController -.->|认证响应| Gateway
+    Gateway -.->|API响应| External
+    
+    %% 样式
+    classDef externalClass fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef gatewayClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef serviceClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef storageClass fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    classDef monitorClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class External externalClass
+    class Gateway gatewayClass
+    class AuthService serviceClass
+    class Storage storageClass
+    class Monitoring monitorClass
+```
+
+## 7. JWT令牌生命周期图
+
+```mermaid
+stateDiagram-v2
+    [*] --> UserLogin: 用户登录/注册
+    
+    UserLogin --> TokenGeneration: 身份验证通过
+    TokenGeneration --> ActiveTokens: 生成Access + Refresh Token
+    
+    state ActiveTokens {
+        [*] --> AccessTokenValid
+        AccessTokenValid --> AccessTokenExpired: 1小时后过期
+        AccessTokenExpired --> TokenRefresh: 使用Refresh Token刷新
+        TokenRefresh --> AccessTokenValid: 获得新的Access Token
+        
+        --
+        [*] --> RefreshTokenValid
+        RefreshTokenValid --> RefreshTokenExpired: 30天后过期
+        RefreshTokenExpired --> ReAuthentication: 需要重新登录
+    }
+    
+    ActiveTokens --> TokenValidation: API调用时验证
+    TokenValidation --> TokenAccepted: 令牌有效
+    TokenValidation --> TokenRejected: 令牌无效/过期
+    
+    TokenRejected --> TokenRefresh: 尝试自动刷新
+    TokenRefresh --> ReAuthentication: 刷新失败
+    
+    TokenAccepted --> [*]: 继续API处理
+    
+    ActiveTokens --> UserLogout: 用户主动登出
+    UserLogout --> TokenBlacklist: 令牌加入黑名单
+    TokenBlacklist --> [*]: 令牌失效
+    
+    ActiveTokens --> TokenCleanup: 定时清理任务
+    TokenCleanup --> [*]: 清理过期令牌
+    
+    ReAuthentication --> [*]: 重新开始流程
+```
+
+## 8. 错误处理流程图
+
+```mermaid
+flowchart TD
+    Request[接收认证请求] --> ValidateInput{输入验证}
+    ValidateInput -->|JSON格式错误| BadRequest[400 Bad Request<br/>INVALID_JSON]
+    ValidateInput -->|缺少必填字段| MissingFields[400 Bad Request<br/>MISSING_FIELDS]
+    ValidateInput -->|有效| ProcessAuth[处理认证请求]
+    
+    ProcessAuth --> AuthType{认证类型}
+    
+    %% 登录流程错误处理
+    AuthType -->|登录| LoginValidation{登录验证}
+    LoginValidation -->|用户不存在| UserNotFound[401 Unauthorized<br/>INVALID_CREDENTIALS]
+    LoginValidation -->|密码错误| InvalidPassword[401 Unauthorized<br/>INVALID_CREDENTIALS]
+    LoginValidation -->|账户锁定| AccountLocked[401 Unauthorized<br/>ACCOUNT_LOCKED]
+    LoginValidation -->|成功| Success[200 OK<br/>返回JWT令牌]
+    
+    %% 注册流程错误处理
+    AuthType -->|注册| RegistrationValidation{注册验证}
+    RegistrationValidation -->|用户名存在| UsernameExists[409 Conflict<br/>USERNAME_EXISTS]
+    RegistrationValidation -->|邮箱存在| EmailExists[409 Conflict<br/>EMAIL_EXISTS]
+    RegistrationValidation -->|密码太弱| WeakPassword[400 Bad Request<br/>WEAK_PASSWORD]
+    RegistrationValidation -->|用户服务异常| UserServiceError[500 Internal Error<br/>USER_SERVICE_ERROR]
+    RegistrationValidation -->|成功| RegistrationSuccess[201 Created<br/>返回用户信息和JWT令牌]
+    
+    %% 令牌验证错误处理
+    AuthType -->|令牌验证| TokenValidation{令牌验证}
+    TokenValidation -->|令牌无效| InvalidToken[401 Unauthorized<br/>INVALID_TOKEN]
+    TokenValidation -->|令牌过期| TokenExpired[401 Unauthorized<br/>TOKEN_EXPIRED]
+    TokenValidation -->|令牌被拉黑| TokenBlacklisted[401 Unauthorized<br/>TOKEN_BLACKLISTED]
+    TokenValidation -->|成功| TokenValid[200 OK<br/>返回令牌信息]
+    
+    %% 令牌刷新错误处理
+    AuthType -->|令牌刷新| RefreshValidation{刷新验证}
+    RefreshValidation -->|刷新令牌无效| InvalidRefresh[401 Unauthorized<br/>INVALID_TOKEN]
+    RefreshValidation -->|刷新令牌过期| RefreshExpired[401 Unauthorized<br/>TOKEN_EXPIRED]
+    RefreshValidation -->|会话不存在| SessionNotFound[401 Unauthorized<br/>SESSION_NOT_FOUND]
+    RefreshValidation -->|成功| RefreshSuccess[200 OK<br/>返回新的JWT令牌]
+    
+    %% 数据库错误处理
+    ProcessAuth --> DatabaseOperation{数据库操作}
+    DatabaseOperation -->|MySQL连接失败| MySQLError[500 Internal Error<br/>DATABASE_ERROR]
+    DatabaseOperation -->|Redis连接失败| RedisError[记录警告,继续处理]
+    DatabaseOperation -->|事务失败| TransactionError[500 Internal Error<br/>DATABASE_ERROR]
+    DatabaseOperation -->|成功| Success
+    
+    %% 外部服务错误处理
+    ProcessAuth --> ExternalService{外部服务调用}
+    ExternalService -->|用户服务不可用| UserServiceDown[503 Service Unavailable<br/>USER_SERVICE_ERROR]
+    ExternalService -->|API网关超时| GatewayTimeout[500 Internal Error<br/>GATEWAY_TIMEOUT]
+    ExternalService -->|成功| Success
+    
+    %% 系统错误处理
+    ProcessAuth --> SystemError{系统异常}
+    SystemError --> LogError[记录详细错误日志]
+    LogError --> InternalError[500 Internal Error<br/>INTERNAL_ERROR]
+    
+    %% 错误恢复机制
+    RedisError --> ProcessAuth
+    
+    %% 错误响应格式化
+    BadRequest --> FormatError[格式化错误响应]
+    MissingFields --> FormatError
+    UserNotFound --> FormatError
+    InvalidPassword --> FormatError
+    AccountLocked --> FormatError
+    UsernameExists --> FormatError
+    EmailExists --> FormatError
+    WeakPassword --> FormatError
+    UserServiceError --> FormatError
+    InvalidToken --> FormatError
+    TokenExpired --> FormatError
+    TokenBlacklisted --> FormatError
+    InvalidRefresh --> FormatError
+    RefreshExpired --> FormatError
+    SessionNotFound --> FormatError
+    MySQLError --> FormatError
+    TransactionError --> FormatError
+    UserServiceDown --> FormatError
+    GatewayTimeout --> FormatError
+    InternalError --> FormatError
+    
+    FormatError --> ErrorResponse["统一错误响应<br/>{error: 错误信息, error_code: CODE, <br/>timestamp: time}"]
+    
+    Success --> SuccessResponse["成功响应<br/>{success: true, data: {...}, <br/>timestamp: time}"]
+    RegistrationSuccess --> SuccessResponse
+    TokenValid --> SuccessResponse
+    RefreshSuccess --> SuccessResponse
+    
+    ErrorResponse --> Client[返回给客户端]
+    SuccessResponse --> Client
+    
+    %% 样式
+    classDef processClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef errorClass fill:#ffebee,stroke:#c62828,stroke-width:2px
+    classDef successClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    classDef warningClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef authClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    
+    class Request,ProcessAuth,FormatError processClass
+    class BadRequest,MissingFields,UserNotFound,InvalidPassword,AccountLocked,UsernameExists,EmailExists,WeakPassword,UserServiceError,InvalidToken,TokenExpired,TokenBlacklisted,InvalidRefresh,RefreshExpired,SessionNotFound,MySQLError,TransactionError,UserServiceDown,GatewayTimeout,InternalError,ErrorResponse errorClass
+    class Success,RegistrationSuccess,TokenValid,RefreshSuccess,SuccessResponse successClass
+    class RedisError warningClass
+    class LoginValidation,RegistrationValidation,TokenValidation,RefreshValidation authClass
+```
+
+## 9. 认证服务安全策略图
+
+```mermaid
+flowchart TD
+    subgraph SecurityLayers[安全层次]
+        direction TB
+        Transport[传输层安全<br/>HTTPS/TLS]
+        Authentication[身份认证层<br/>JWT Token]
+        Authorization[授权控制层<br/>Role-Based Access]
+        DataProtection[数据保护层<br/>加密存储]
+    end
+    
+    subgraph AuthMechanisms[认证机制]
+        direction TB
+        PasswordAuth[密码认证<br/>bcrypt哈希]
+        TokenAuth[令牌认证<br/>JWT签名验证]
+        SessionMgmt[会话管理<br/>多设备支持]
+        RefreshMechanism[令牌刷新<br/>自动更新机制]
+    end
+    
+    subgraph SecurityPolicies[安全策略]
+        direction TB
+        PasswordPolicy[密码策略<br/>强度验证]
+        LoginAttempts[登录限制<br/>失败次数控制]
+        SessionTimeout[会话超时<br/>自动失效]
+        TokenBlacklist[令牌黑名单<br/>撤销机制]
+    end
+    
+    subgraph ThreatProtection[威胁防护]
+        direction TB
+        BruteForce[暴力破解防护<br/>登录限制]
+        TokenHijacking[令牌劫持防护<br/>签名验证]
+        SessionFixation[会话固定防护<br/>会话重新生成]
+        CSRF[CSRF防护<br/>令牌验证]
+    end
+    
+    %% 安全流程
+    Transport --> Authentication
+    Authentication --> Authorization
+    Authorization --> DataProtection
+    
+    %% 认证机制关联
+    PasswordAuth --> PasswordPolicy
+    TokenAuth --> TokenBlacklist
+    SessionMgmt --> SessionTimeout
+    RefreshMechanism --> TokenAuth
+    
+    %% 威胁防护关联
+    BruteForce --> LoginAttempts
+    TokenHijacking --> TokenAuth
+    SessionFixation --> SessionMgmt
+    CSRF --> TokenAuth
+    
+    %% 样式
+    classDef securityClass fill:#ffe1e1,stroke:#d32f2f,stroke-width:2px
+    classDef authClass fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef policyClass fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef protectionClass fill:#e1f5fe,stroke:#0277bd,stroke-width:2px
+    
+    class SecurityLayers securityClass
+    class AuthMechanisms authClass
+    class SecurityPolicies policyClass
+    class ThreatProtection protectionClass
+```
